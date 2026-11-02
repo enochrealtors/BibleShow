@@ -52,6 +52,10 @@ Versions are historical records and should be checked before major upgrades.
 - Added a working light/dark theme toggle and responsive desktop/mobile layouts.
 - Updated the document title and page metadata to BibleShow.
 - Production build passed after the shell implementation.
+- Narrow browser preview checked at a 296 px viewport; navigation and theme toggle confirmed.
+- Saved the shell checkpoint as local commit `9ded581` (`feat: add initial BibleShow application shell`).
+- Expanded `docs/DATABASE_DESIGN.md` with the initial SQLite schema proposal.
+- Added `docs/BIBLE_TRANSLATION_SOURCES.md` with a source/rights register and WEB candidate review.
 
 ### Desktop foundation
 - Tauri 2 initialised.
@@ -59,6 +63,7 @@ Versions are historical records and should be checked before major upgrades.
 - Desktop window configured.
 - Tauri development application successfully launched.
 - BibleShow shell configured to display inside the existing Tauri window.
+- Tauri development launch rechecked after the shell work; the process started, with a `libEGL` DRI3 warning. No native app window is exposed to this review session, so Tauri-window visual review remains pending.
 
 ### Documentation
 - PROJECT_GUIDE.md created.
@@ -81,9 +86,9 @@ No presentation, song, media or Scripture detection functionality has been imple
 
 - Tauri application identifier is still the temporary `com.tauri.dev`.
 - Git repository is on `main`; baseline commit `90eef49` is pushed to `origin/main`.
-- Current shell changes are not yet committed.
+- Shell commit `9ded581` is local and not yet pushed; `main` is one commit ahead of `origin/main`.
 - Final application branding is pending.
-- The project currently uses the initial Vite React/TypeScript scaffold.
+- The frontend remains on the initial Vite React/TypeScript foundation, with a custom BibleShow shell.
 
 Do not change working configuration unnecessarily.
 
@@ -156,10 +161,10 @@ Do not change working configuration unnecessarily.
 
 The next development sequence is:
 
-1. Run the Tauri application and review the shell at desktop and narrow window sizes.
-2. Refine the shell based on visual review.
-3. Design the SQLite Bible data model and identify legally usable translation sources.
-4. Begin Bible Study workspace functionality after the data and licensing decisions are documented.
+1. Confirm whether the WEB `ENGWEBP` edition and American English are suitable for the first development dataset and confirm launch-market assumptions.
+2. Decide whether the translation will ship in the installer or as an importable/downloadable data package.
+3. Review the shell inside the Tauri desktop window at a standard desktop size when a native window is available.
+4. Implement versioned SQLite migrations and a verified USFM importer after those decisions.
 
 Do not jump ahead to advanced AI or cloud functionality.
 

@@ -367,3 +367,83 @@ The following decisions remain open:
 - Data migration framework.
 
 **Governing principle:** The database must support both Bible Study and Church Presentation without creating separate Bible content systems.
+
+---
+
+## 15. Initial Local Schema Proposal
+
+This section refines the conceptual entities above into a first SQLite schema plan. It is a design proposal, not an implemented migration. The selected Rust SQLite driver and migration tool remain open.
+
+### `bible_translations`
+
+One row per installed translation edition. Keep the text's identity and provenance with the local database so an offline installation can show the correct name, edition, and rights notice.
+
+Proposed fields:
+- `id` — stable source identifier, such as `ENGWEBP`.
+- `short_name`, `full_name`, `language_tag`, `dialect`, `edition`.
+- `source_organization`, `source_id`, `source_url`, `source_format`.
+- `versification_id` — identifies the source's book/chapter/verse numbering scheme.
+- `rights_label`, `rights_url`, `copyright_notice`, `trademark_notice`.
+- `source_revision`, `source_sha256`, `imported_at_utc`.
+- `is_installed` and optional `is_default`.
+
+Use a stable ID from the text source where possible. A display abbreviation is not a database key.
+
+### `bible_books` and `translation_books`
+
+`bible_books` is the shared catalog of books, keyed by a stable OSIS book code such as `Gen` or `John`. It stores canonical English name, short name, and testament grouping.
+
+`translation_books` defines which books are present in each edition and their displayed order. Its primary key is `(translation_id, book_id)`; it also stores `book_order` and `chapter_count`. This supports editions with different canons and book ordering without duplicating book metadata.
+
+### `bible_chapters`
+
+One row per chapter present in a translation:
+- `translation_id`, `book_id`, `chapter_number` — composite primary key.
+- `chapter_order` — explicit sequence for navigation.
+- `verse_count` — count of imported source segments, not a claim that all translations use the same versification.
+
+The composite foreign key `(translation_id, book_id)` references `translation_books`.
+
+### `bible_verses`
+
+Store source-native verse segments, including source labels and sequence:
+- `translation_id`, `book_id`, `chapter_number`, `verse_order` — composite primary key.
+- `verse_label` — exact source label, retained as text (for example `3` or `3-4`).
+- `verse_start` and `verse_end` — nullable integer coordinates when the source label can be parsed as a numeric verse or range.
+- `text` — imported text, preserved faithfully.
+
+The composite foreign key `(translation_id, book_id, chapter_number)` references `bible_chapters`. Add an index on `(translation_id, book_id, chapter_number, verse_start)` for reference lookup. Do not assume a verse in one edition always maps one-to-one to a verse in another edition.
+
+### Personal study records
+
+Keep personal records separate from translation content:
+- `bookmarks`: UUID, passage coordinates, optional label, created/updated timestamps.
+- `highlights`: UUID, passage coordinates, color token, created/updated timestamps.
+- `study_notes`: UUID, passage coordinates, title/body, created/updated timestamps.
+
+Passage coordinates should use a stable book code, chapter, start/end verse labels, and a versification identifier. Store an optional translation preference separately; personal records must not copy verse text. UUIDs and timestamps make later backup/synchronization design possible. Deletion/sync markers can be added through a versioned migration when synchronization is designed.
+
+### Presentation references
+
+Scripture slides should store a book code, chapter, verse range, versification identifier, and selected translation ID. Resolve the displayed words from `bible_verses` at render time rather than copying text into the slide record. A later presentation export format may embed a snapshot when portability requires it, subject to the translation's rights.
+
+## 16. Integrity, Search, and Import Rules
+
+- Enable SQLite foreign-key enforcement on every connection.
+- Apply schema changes through numbered, reversible migrations where practical; never edit an installed database manually.
+- Validate book/chapter/verse references against the installed edition at import time.
+- Retain source-native verse labels and ordering, even when numeric coordinates are available.
+- Store UTC timestamps and stable IDs for user-created records.
+- Treat FTS5 as a separate capability to verify with the chosen bundled SQLite build. It is not a prerequisite for exact reference navigation.
+- Import into a staging transaction, verify book/chapter/segment counts and source checksum, then mark a translation installed.
+- Keep downloaded source archives out of Git unless distribution rights and repository size have been reviewed; the application may provide an import path for a user-supplied archive.
+
+## 17. Design Decisions Still Open
+
+- Rust SQLite driver and migration framework.
+- Canonical reference model and mapping strategy for cross-translation comparison.
+- Whether imported Bible text is bundled in the installer or installed from a separate signed data package.
+- Full-text search implementation and Unicode normalization policy.
+- Final passage-coordinate representation for personal notes and highlights.
+
+Do not implement cross-translation comparison until the versification mapping approach has been specified.
