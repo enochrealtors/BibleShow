@@ -2,7 +2,7 @@
 
 **Document version:** 1.0
 **Last updated:** 2 November 2026
-**Project status:** GitHub baseline established; initial application shell implemented.
+**Project status:** GitHub baseline established; initial shell implemented; first local content package prepared.
 
 ## 1. Current Development Environment
 
@@ -55,7 +55,12 @@ Versions are historical records and should be checked before major upgrades.
 - Narrow browser preview checked at a 296 px viewport; navigation and theme toggle confirmed.
 - Saved the shell checkpoint as local commit `9ded581` (`feat: add initial BibleShow application shell`).
 - Expanded `docs/DATABASE_DESIGN.md` with the initial SQLite schema proposal.
-- Added `docs/BIBLE_TRANSLATION_SOURCES.md` with a source/rights register and WEB candidate review.
+- Added `docs/BIBLE_TRANSLATION_SOURCES.md` with the user's KJV selection and rights review.
+- Inspected the user-provided `Hymns & Bibles.zip`; validated the selected KJV file (66 books, 1,189 chapters, 31,102 verses).
+- Prepared a local staging package with the KJV, 793 structured hymns, and 2,742 songs containing lyrics.
+- Repaired Windows-1252/UTF-8 encoding in 716 hymn files and split all 793 hymns into 3,849 OpenLyrics sections; lyric wording was checked as preserved.
+- Restored lyrics for 13 songs from unambiguous duplicates; listed 700 still-empty songs for manual/source-backed follow-up.
+- Added `docs/CONTENT_IMPORT_REVIEW.md`; content files remain outside Git and are not imported into the app yet.
 
 ### Desktop foundation
 - Tauri 2 initialised.
@@ -71,6 +76,7 @@ Versions are historical records and should be checked before major upgrades.
 - docs/DEVELOPMENT_STATUS.md created.
 - docs/DATABASE_DESIGN.md created.
 - docs/FEATURES.md created.
+- docs/CONTENT_IMPORT_REVIEW.md created.
 
 The supporting project documents are present. Their contents remain planning references and should be updated as implementation progresses.
 
@@ -78,7 +84,7 @@ The supporting project documents are present. Their contents remain planning ref
 
 The Vite starter screen has been replaced by a first-pass BibleShow shell. Home, Bible Study and Church Presentation are navigable, and the theme toggle switches between light and dark palettes. The study and presentation pages are structural landing states only; their engines and workflows are not implemented. A narrow browser preview was reviewed; the responsive navigation, page switching and theme toggle were checked. Review inside the Tauri desktop window remains pending.
 
-No Bible database or Bible translations have been integrated.
+The user-selected KJV and cleaned lyrics are prepared in a local staging package, but the application has no content importer or Bible database yet. No Bible content is currently loaded in the app.
 
 No presentation, song, media or Scripture detection functionality has been implemented.
 
@@ -104,7 +110,8 @@ Do not change working configuration unnecessarily.
 
 ### Bible Engine
 - [ ] Design SQLite database.
-- [ ] Identify legally usable Bible translation sources.
+- [~] Draft initial SQLite schema; choose driver/migration framework and implement migrations.
+- [~] Identify Bible translation rights; KJV source selected, territory review remains open.
 - [ ] Import initial Bible translation.
 - [ ] Implement Bible book navigation.
 - [ ] Implement chapter and verse navigation.
@@ -161,10 +168,11 @@ Do not change working configuration unnecessarily.
 
 The next development sequence is:
 
-1. Confirm whether the WEB `ENGWEBP` edition and American English are suitable for the first development dataset and confirm launch-market assumptions.
-2. Decide whether the translation will ship in the installer or as an importable/downloadable data package.
-3. Review the shell inside the Tauri desktop window at a standard desktop size when a native window is available.
-4. Implement versioned SQLite migrations and a verified USFM importer after those decisions.
+1. Implement a local content importer and versioned SQLite migrations that keep Bible and song data outside Git.
+2. Load the user-selected KJV from the prepared package as the default translation; add Bible book/chapter/verse navigation.
+3. Add the complete hymns/songs from the package to a local library, retaining credits and copyright metadata.
+4. Review KJV/song rights for target release markets before bundling content in a public build; review the 700 incomplete songs when verified lyric sources become available.
+5. Review the shell inside the Tauri desktop window when a native window is available.
 
 Do not jump ahead to advanced AI or cloud functionality.
 
@@ -181,4 +189,4 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Visually review the initial shell, then plan the first Bible Study functionality around the agreed shared Bible Engine.
+**Current restart point:** Build the local importer for the prepared KJV and lyric package, keeping content outside Git and preserving source/rights metadata.

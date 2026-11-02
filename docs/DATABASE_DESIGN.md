@@ -447,3 +447,27 @@ Scripture slides should store a book code, chapter, verse range, versification i
 - Final passage-coordinate representation for personal notes and highlights.
 
 Do not implement cross-translation comparison until the versification mapping approach has been specified.
+
+## 18. Initial ZIP Import Mapping
+
+The first source package is the user-provided `Hymns & Bibles.zip`.
+
+### KJV XML
+
+- Import only `Bibles/EnglishKJBible.xml` from this archive for the first translation.
+- Map its numbered books `1`–`66` to the shared canonical book catalog by KJV order; the file contains no book-name elements.
+- Preserve the source chapter and verse numbers and exact verse text.
+- Store the user's selected KJV as the default translation and record the full source-archive SHA-256, member path, and in-file rights status.
+- Import validation must confirm 66 books, 1,189 chapters, and 31,102 verses.
+
+### OpenLyrics files
+
+Map hymn/song XML into the existing `songs` and `song_sections` entities:
+- Preserve the primary and alternate titles, authors, copyright field, any CCLI metadata, and source filename.
+- Preserve each OpenLyrics section name and order (`v1`, `c1`, etc.); store its lines in order so presentation formatting can be reconstructed.
+- Map hymn `Category` values to song themes rather than leaving them embedded in the lyric text.
+- Do not import records with no lyric text as presentation-ready songs. Keep an audit list so a user can supply verified lyrics later.
+
+### Local-only handling
+
+The cleaned staging package must be imported into the user's local application data, not compiled into frontend assets or committed to Git. The importer should keep the raw source package separate from the SQLite content tables and record a checksum for each installed package.

@@ -1,59 +1,61 @@
 # BIBLESHOW — BIBLE TEXT SOURCES AND RIGHTS REGISTER
 
-**Document version:** 1.0  
-**Reviewed:** 2 November 2026  
-**Status:** Recommended first candidate identified; user approval and target-market review pending.
+**Document version:** 1.1
+**Reviewed:** 2 November 2026
+**Status:** KJV selected by the user as the default and first development translation; release-market rights review remains open.
 
 ## 1. Purpose
 
 Record the source and reuse terms for Bible text considered for BibleShow. A translation may be bundled, downloaded, displayed, searched, or redistributed only after its rights and source edition are recorded. UI quotation allowances do not automatically authorize bundling a complete searchable translation.
 
-## 2. Recommended first candidate
+## 2. Selected first translation
 
-**World English Bible (WEB), stable 66-book edition**  
-**eBible.org source ID:** `ENGWEBP` (`engwebp`)  
-**Language/dialect:** English, American  
-**Source format available:** USFM archive, `engwebp_usfm.zip`  
-**Recommendation status:** Candidate for the first local Bible dataset; not yet imported.
+**Translation:** King James Version (KJV)
+**User preference:** KJV is the default Bible translation.
+**Source:** `Hymns & Bibles/Bibles/EnglishKJBible.xml` from the user-provided `Hymns & Bibles.zip`
+**Source archive SHA-256:** `a4a1c59d96f8e0ae5ee5196089031cc2087d06765213830bddeacb1a71b82670`
+**Source metadata:** The XML labels the translation `English KJV` and its status `Public Domain`.
+**Validation:** XML parses; 66 books, 1,189 chapters, and 31,102 non-empty verses.
 
-The eBible.org source record identifies this edition as public domain, provides the USFM download, and identifies it as the 66-book edition without the Deuterocanon/Apocrypha. The project’s rights page states that the text may be copied, distributed, redistributed, sold, and used in Bible study software. It also says the name “World English Bible” is a trademark and should identify faithful copies; if the text is changed, the changed text must not continue to be called by that name.
+Use this exact user-supplied KJV file as BibleShow's first translation; do not silently replace it with a different KJV edition. The archive's exact upstream publisher, edition, and revision are not recorded in the XML, so the in-file public-domain label is provenance supplied with the asset, not an independent rights verification.
 
-This is a practical first-data candidate because BibleShow can keep an offline copy and redistribute the text without relying on a quotation allowance. Use the plain USFM text archive, not a decorated PDF or other package that may contain separately copyrighted maps, artwork, or fonts.
+### Territory note
 
-### Source and rights references
-
-- Edition record and available USFM archive: <https://www.ebible.org/find/details.php?id=engwebp>
-- Copyright and trademark terms for the WEB: <https://ebible.org/engwebp/copyright.htm>
-- WEB FAQ on publication and software use: <https://www.ebible.org/eng-web/webfaq.htm>
-- eBible.org intellectual-property policy: <https://ebible.org/legal.php>
-
-## 3. Handling requirements for the candidate
-
-Before import:
-
-1. Download the USFM archive from the edition record above.
-2. Record the retrieval date, source URL, edition/source ID, and SHA-256 of the exact archive.
-3. Parse it without silently rewriting verse wording or punctuation.
-4. Retain its canonical book order, source labels, and source revision information.
-5. Display the translation's full name accurately and use the trademarked name only for faithful text.
-6. Store source and rights metadata in the local database and show it in an About/translation-details view.
-7. Recheck the source record and intended distribution jurisdictions before release.
-
-The rights page is the contributor's statement about the text. This register is an engineering record, not a legal opinion about every jurisdiction or every associated asset.
-
-## 4. Restricted-translation example: NIV
-
-Do not bundle or redistribute the NIV without written permission covering the specific BibleShow product and intended distribution. Biblica's current permissions guidance says its general quotation allowance is limited (including a 500-verse cap, no complete book, and other conditions); app and website display requires written permission or an applicable express license, and full-text licensing is available only to a registered legal entity. Biblica also has separate requirements for AI/ML uses. Revisit only after the project has a legal entity and a written license whose scope covers offline storage, search, church presentation, redistribution, and any intended intelligent-detection use.
+UK government guidance says the right to print, publish, and distribute the 1611 King James Bible is licensed by the Crown to publishers. Cambridge University Press says it administers those rights in the UK as the Crown's patentee. Confirm intended release territories before bundling or distributing the text publicly. This note does not determine the legal status of every edition or every jurisdiction.
 
 References:
-- Biblica permissions guidance: <https://www.biblica.com/permissions-old/>
-- Biblica terms and copyright statement: <https://www.biblica.com/terms-of-use/>
+- [GOV.UK copyright guidance — King James Bible](https://www.gov.uk/government/publications/copyright-notice-duration-of-copyright-term/copyright-notice-duration-of-copyright-term)
+- [Cambridge rights information for the Authorized (King James) Version](https://assets.cambridge.org/97805211/63347/copyright/9780521163347_copyright_info.pdf)
 
-## 5. Open decisions before release
+## 3. Other Bible files in the ZIP
 
-- Confirm that American English is suitable for BibleShow's first audience, or select a different WEB edition.
-- Confirm initial target countries and have the rights position checked for those launch markets before bundling a translation in a public release.
-- Decide whether the first translation is bundled with the installer or provided as a separate downloadable/importable data package.
-- Decide whether WEB is the sole initial translation or whether users will import separately licensed texts.
+Only the KJV is included in the staging package. The other five files remain excluded until their rights and permitted distribution are documented:
 
-**Next approval needed:** Confirm the `ENGWEBP` stable 66-book edition as BibleShow's first development dataset, or name the preferred English dialect/edition. Do not commit the Bible text archive to Git.
+- `EnglishRSVBible.xml` — names the Division of Christian Education of the National Council of the Churches of Christ in the United States; the file does not grant redistribution rights.
+- `EnglishAmplifiedBible.xml` — carries a 2015 Lockman Foundation copyright notice and “All rights reserved.”
+- `Igbo2020Bible.xml` — carries a Biblica copyright notice.
+- `YorubaBible.xml` — carries a Bible Society of Nigeria copyright notice.
+- `NigerianPidginBible.xml` — carries a Wycliffe Bible Translators / Nigerian Pidgin Translation Committee copyright notice.
+
+## 4. Lyrics and hymns
+
+The ZIP contains 793 hymn files and 3,442 song files in OpenLyrics XML. Author names are present in the song metadata; 485 song files also contain a copyright field. Missing notices do not establish public-domain status. Preserve author and copyright metadata when importing. Keep the staging package out of Git and do not include the lyrics in a public BibleShow release until song-by-song rights and any church presentation license requirements have been checked.
+
+## 5. Prepared local staging package
+
+`BibleShow_Initial_Content_Staging.zip` in the task outputs contains the selected KJV, all 793 structurally repaired hymns, and 2,742 songs with lyrics. It does not contain the five unselected Bible translations or 700 incomplete song records. The package is staged for local import work; it has not been imported into the application or pushed to GitHub.
+
+The preparation report and incomplete-song list are:
+- `BibleShow_Initial_Content_Report.md`
+- `BibleShow_Incomplete_Songs.csv`
+
+No lyric text was invented or fetched from the web. Thirteen empty song records were restored only from unambiguous duplicate records in the same user-provided archive. The remaining 700 entries require a verified source before import.
+
+## 6. Open decisions before public release
+
+- Confirm the countries where BibleShow will be distributed and review KJV rights for those markets.
+- Decide whether Bible text ships in the installer or as a separate local data package.
+- Confirm that the user has rights to use the supplied song lyrics in the intended church presentation workflow and obtain any additional distribution rights needed for public release.
+- Decide whether separately licensed translations may be imported by users.
+
+Do not commit the Bible text or song archive to Git.
