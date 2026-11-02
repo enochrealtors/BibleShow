@@ -2,7 +2,7 @@
 
 **Document version:** 1.0
 **Last updated:** 2 November 2026
-**Project status:** Foundation established; application development beginning.
+**Project status:** GitHub baseline established; initial application shell implemented.
 
 ## 1. Current Development Environment
 
@@ -47,13 +47,18 @@ Versions are historical records and should be checked before major upgrades.
 - TypeScript dependency compatibility issue resolved.
 - npm dependency audit reduced to zero reported vulnerabilities.
 - Production frontend build completed successfully.
+- Replaced the Vite starter screen with the initial BibleShow application shell.
+- Added Home, Bible Study and Church Presentation navigation and landing states.
+- Added a working light/dark theme toggle and responsive desktop/mobile layouts.
+- Updated the document title and page metadata to BibleShow.
+- Production build passed after the shell implementation.
 
 ### Desktop foundation
 - Tauri 2 initialised.
 - Application name configured as BibleShow.
 - Desktop window configured.
 - Tauri development application successfully launched.
-- Default Vite starter interface displayed inside the desktop window.
+- BibleShow shell configured to display inside the existing Tauri window.
 
 ### Documentation
 - PROJECT_GUIDE.md created.
@@ -62,13 +67,11 @@ Versions are historical records and should be checked before major upgrades.
 - docs/DATABASE_DESIGN.md created.
 - docs/FEATURES.md created.
 
-The last three supporting documents are currently empty and must be populated.
+The supporting project documents are present. Their contents remain planning references and should be updated as implementation progresses.
 
 ## 4. Current Application State
 
-The application is still displaying the default Vite starter interface.
-
-The actual BibleShow user interface has not yet been implemented.
+The Vite starter screen has been replaced by a first-pass BibleShow shell. Home, Bible Study and Church Presentation are navigable, and the theme toggle switches between light and dark palettes. The study and presentation pages are structural landing states only; their engines and workflows are not implemented. A narrow browser preview was reviewed; the responsive navigation, page switching and theme toggle were checked. Review inside the Tauri desktop window remains pending.
 
 No Bible database or Bible translations have been integrated.
 
@@ -77,7 +80,8 @@ No presentation, song, media or Scripture detection functionality has been imple
 ## 5. Known Configuration Items
 
 - Tauri application identifier is still the temporary `com.tauri.dev`.
-- Git repository setup and initial commit need verification.
+- Git repository is on `main`; baseline commit `90eef49` is pushed to `origin/main`.
+- Current shell changes are not yet committed.
 - Final application branding is pending.
 - The project currently uses the initial Vite React/TypeScript scaffold.
 
@@ -86,12 +90,12 @@ Do not change working configuration unnecessarily.
 ## 6. Outstanding Implementation Work
 
 ### Foundation
-- [ ] Establish Git repository and initial commit.
-- [ ] Create BibleShow visual identity.
-- [ ] Replace default Vite starter interface.
-- [ ] Implement application shell.
-- [ ] Implement main navigation.
-- [ ] Establish light and dark themes.
+- [x] Establish Git repository and initial commit.
+- [~] Create BibleShow visual identity.
+- [x] Replace default Vite starter interface.
+- [x] Implement initial application shell.
+- [x] Implement main navigation.
+- [x] Establish initial light and dark themes.
 
 ### Bible Engine
 - [ ] Design SQLite database.
@@ -152,12 +156,10 @@ Do not change working configuration unnecessarily.
 
 The next development sequence is:
 
-1. Populate the remaining project documentation.
-2. Verify and establish Git version control.
-3. Inspect the current project structure.
-4. Design the BibleShow application shell.
-5. Implement the first actual user interface.
-6. Begin the Bible Engine.
+1. Run the Tauri application and review the shell at desktop and narrow window sizes.
+2. Refine the shell based on visual review.
+3. Design the SQLite Bible data model and identify legally usable translation sources.
+4. Begin Bible Study workspace functionality after the data and licensing decisions are documented.
 
 Do not jump ahead to advanced AI or cloud functionality.
 
@@ -174,4 +176,4 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Replace the default Vite starter interface with the initial BibleShow application shell.
+**Current restart point:** Visually review the initial shell, then plan the first Bible Study functionality around the agreed shared Bible Engine.
