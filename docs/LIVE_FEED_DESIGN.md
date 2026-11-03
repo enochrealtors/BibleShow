@@ -1,6 +1,6 @@
 # Live Feed Design
 
-**Status:** Direct camera/webcam capture and HTTP(S) MJPEG/video endpoints are implemented in the Live Feed feed. Camera output uses an operator-to-audience WebRTC relay. Runtime compatibility and actual device playback still need desktop verification. RTSP/GStreamer remains an optional experimental path.
+**Status:** Direct camera/webcam capture, HTTP(S) MJPEG/video endpoints, and YouTube links through the official embedded player are implemented in the Live Feed feed. Camera output uses an operator-to-audience WebRTC relay. Runtime compatibility and actual device playback still need desktop verification. RTSP/GStreamer remains an optional experimental path.
 **Last updated:** 3 November 2026
 
 ## Goal
@@ -28,8 +28,9 @@ Keep source credentials out of project exports and visible labels. Define a secu
 ### 2. Browser-playable direct URL streams — implemented; runtime verification pending
 
 - Accept direct HTTP(S) endpoints as MJPEG image streams or browser video. HLS (`.m3u8`) is submitted as browser video and must be checked on Windows WebView2 and Ubuntu WebKitGTK; no HLS JavaScript player is bundled yet. MP4/WebM local media retains its existing path.
-- Preserve URL privacy: mask input, do not log it, and do not persist credentials or tokens in project JSON. Explain that a URL must point directly to a playable stream endpoint, not merely a webpage or a platform's watch page.
+- Preserve URL privacy: show the pasted URL clearly by default, offer a hide control, do not log it, and do not persist credentials or tokens in project JSON. Explain that direct stream formats require a playable endpoint; supported platform links such as YouTube are handled with their own embed player.
 - Use the same operator-to-audience WebRTC relay for the decoded URL stream where both windows must show one synchronized source.
+- Recognize common YouTube watch, short, and live links and convert only the validated 11-character video ID to YouTube's documented `/embed/VIDEO_ID` player URL. Do not pass a watch page to `<video>`; keep YouTube iframe playback distinct from direct stream formats. A stream can still refuse embed playback or require a user gesture for audio/autoplay.
 
 ### 3. RTSP/RTSPS and NDI — optional native adapters
 

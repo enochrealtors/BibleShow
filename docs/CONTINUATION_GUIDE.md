@@ -37,7 +37,7 @@ You are continuing development of **BibleShow**, an offline-first church present
 
 ### Current development stage: multi-format Bible and Lyrics imports
 
-The Live Feed implementation now supports operator-window camera/webcam capture, a WebRTC relay of the same camera to audience output, direct HTTP(S) video/HLS and MJPEG endpoints, plus the existing optional experimental RTSP/GStreamer adapter. Read `docs/LIVE_FEED_DESIGN.md` and verify these paths on desktop when camera hardware and supported stream endpoints are available. The code is not yet validated on Windows WebView2 or Ubuntu WebKitGTK.
+The Live Feed implementation now supports operator-window camera/webcam capture, a WebRTC relay of the same camera to audience output, direct HTTP(S) video/HLS and MJPEG endpoints, YouTube watch/live links via YouTube's embed player, plus the existing optional experimental RTSP/GStreamer adapter. Read `docs/LIVE_FEED_DESIGN.md` and verify these paths on desktop when camera hardware and supported stream endpoints are available. The code is not yet validated on Windows WebView2 or Ubuntu WebKitGTK. YouTube playback may still be blocked when the owner disables embedding or the web player requires a user click.
 
 Next, extend the resource library imports using the formats selected by the user:
 

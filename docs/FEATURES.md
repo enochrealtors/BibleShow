@@ -66,6 +66,7 @@ No feature should be marked implemented until it has been tested.
 - [~] Content-feed tabs for Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Media, Themes, Functions, and Overlays; Bible, Lyrics, Videos/Images, Presentations, camera capture, browser-playable stream URLs and experimental RTSP are connected.
 - [~] Capture a connected camera/webcam in the operator window and relay the same feed to the audience window over WebRTC; desktop permission and runtime verification remain.
 - [~] Play direct HTTP(S) video/HLS and MJPEG endpoints when supported by the target WebView; Windows WebView2 and Ubuntu WebKitGTK compatibility remain to be verified.
+- [~] Detect common YouTube watch/live links and display them in YouTube's embedded player; owner embed restrictions and user gesture/autoplay behavior need desktop verification.
 - [!] RTSP/RTSPS uses an experimental GStreamer backend; Windows runtime packaging and real-source playback remain unverified. NDI is not implemented.
 - [x] KJV reference/range and keyword search in the presentation workspace.
 - [x] Multi-verse passages are staged as one readable verse per slide.

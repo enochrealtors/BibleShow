@@ -30,7 +30,7 @@ type ChapterData = { book_number: number; name: string; chapter_number: number; 
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
-type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; liveStreamUrl?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' }
+type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
 type QueuedSlide = PresentationSlide & { queueId: string }
 type MediaFile = { id: string; filename: string; mediaType: 'image' | 'video'; mimeType: string; localPath: string; fileSize: number }
 type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null }
@@ -40,6 +40,26 @@ type PresentationSummary = { id: number; title: string; updatedAt: string; slide
 type SavedPresentation = { id: number; title: string; slides: PresentationSlide[] }
 type LiveFeedInfo = { streamId: string; streamUrl: string }
 type CameraSignal = { sourceId: string; sender?: 'operator' | 'audience'; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }
+
+function extractYoutubeVideoId(value: string) {
+  try {
+    const url = new URL(value.trim())
+    const host = url.hostname.toLowerCase().replace(/^www\./, '')
+    let videoId: string | null = null
+    if (host === 'youtu.be') videoId = url.pathname.split('/').filter(Boolean)[0] ?? null
+    else {
+      if (host !== 'youtube.com' && host !== 'm.youtube.com' && host !== 'youtube-nocookie.com') return null
+      if (url.pathname === '/watch') videoId = url.searchParams.get('v')
+      else videoId = url.pathname.match(/^\/(?:live|embed|shorts|v)\/([^/?]+)/)?.[1] ?? null
+    }
+    return videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId) ? videoId : null
+  } catch { return null }
+}
+
+function youtubeEmbedUrl(videoId: string, muted: boolean) {
+  const parameters = new URLSearchParams({ autoplay: '1', controls: '1', playsinline: '1', mute: muted ? '1' : '0' })
+  return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?${parameters.toString()}`
+}
 type PresentationFeed = 'bible' | 'lyrics' | 'media' | 'presentations' | 'live' | 'url' | 'themes' | 'functions' | 'overlays'
 const presentationFeedLabels: Record<PresentationFeed, string> = {
   bible: 'Bible', lyrics: 'Lyrics', media: 'Videos & Images', presentations: 'Presentations', live: 'Live Feed', url: 'URL Media', themes: 'Themes', functions: 'Functions', overlays: 'Overlays',
@@ -336,8 +356,9 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     setPersistenceMessage('Camera connected and staged in Preview. Send it Live when ready.')
   }
 
-  function connectStreamUrl(sourceUrl: string, streamKind: 'video' | 'mjpeg') {
-    const slide: PresentationSlide = { sourceId: `url:${Date.now()}`, title: 'Direct Stream', subtitle: 'Browser-playable stream', body: '', reference: 'Direct Stream', kind: 'live', liveStreamUrl: sourceUrl, liveStreamKind: streamKind }
+  function connectStreamUrl(sourceUrl: string, streamKind: 'video' | 'mjpeg' | 'youtube') {
+    const youtubeVideoId = streamKind === 'youtube' ? sourceUrl : undefined
+    const slide: PresentationSlide = { sourceId: `url:${Date.now()}`, title: streamKind === 'youtube' ? 'YouTube Live' : 'Direct Stream', subtitle: streamKind === 'youtube' ? 'YouTube embedded player' : 'Browser-playable stream', body: '', reference: streamKind === 'youtube' ? 'YouTube Live' : 'Direct Stream', kind: 'live', liveStreamUrl: streamKind === 'youtube' ? undefined : sourceUrl, youtubeVideoId, liveStreamKind: streamKind }
     setLiveFeedSlide(slide)
     preview(slide)
     setPersistenceMessage('Stream URL staged in Preview. Confirm playback before sending it Live.')
@@ -748,7 +769,7 @@ function SavedPresentationsFeed({ presentations, onRefresh, onPreview, onSendLiv
 function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, slide, cameraStream, onPreview, onSendLive }: {
   onConnect: (url: string) => Promise<void>
   onConnectCamera: (stream: MediaStream, label: string) => void
-  onConnectUrl: (url: string, kind: 'video' | 'mjpeg') => void
+  onConnectUrl: (url: string, kind: 'video' | 'mjpeg' | 'youtube') => void
   onStop: () => Promise<void>
   slide: PresentationSlide | null
   cameraStream: MediaStream | null
@@ -759,11 +780,13 @@ function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, sli
   const [connecting, setConnecting] = useState(false)
   const [sourceMode, setSourceMode] = useState<'camera' | 'url' | 'rtsp'>('camera')
   const [streamKind, setStreamKind] = useState<'video' | 'mjpeg'>('video')
+  const [showUrl, setShowUrl] = useState(true)
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedDevice, setSelectedDevice] = useState('')
   const [feedError, setFeedError] = useState('')
   const localVideo = useRef<HTMLVideoElement>(null)
-  const connected = Boolean(slide && (slide.liveStreamKind === 'camera' ? cameraStream : slide.liveStreamUrl))
+  const pastedYoutubeId = extractYoutubeVideoId(sourceUrl)
+  const connected = Boolean(slide && (slide.liveStreamKind === 'camera' ? cameraStream : slide.liveStreamKind === 'youtube' ? slide.youtubeVideoId : slide.liveStreamUrl))
   const activeSlide = connected ? slide : null
 
   useEffect(() => {
@@ -789,9 +812,13 @@ function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, sli
   function connectUrl(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     try {
-      const url = new URL(sourceUrl.trim())
-      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use a direct HTTP or HTTPS stream endpoint.')
-      onConnectUrl(url.toString(), streamKind)
+      const youtubeId = extractYoutubeVideoId(sourceUrl)
+      if (youtubeId) onConnectUrl(youtubeId, 'youtube')
+      else {
+        const url = new URL(sourceUrl.trim())
+        if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use a direct HTTP or HTTPS stream endpoint, or paste a YouTube watch/live link.')
+        onConnectUrl(url.toString(), streamKind)
+      }
       setFeedError('')
     } catch (error) { setFeedError(error instanceof Error ? error.message : String(error)) }
   }
@@ -802,11 +829,11 @@ function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, sli
       <label htmlFor="live-source-mode">Source type</label>
       <select id="live-source-mode" value={sourceMode} onChange={(event) => setSourceMode(event.target.value as typeof sourceMode)} disabled={connected}><option value="camera">Connected camera / webcam</option><option value="url">Direct HTTP(S) stream URL</option><option value="rtsp">RTSP / RTSPS (GStreamer)</option></select>
       {sourceMode === 'camera' && <><label htmlFor="live-camera-device">Camera</label><select id="live-camera-device" value={selectedDevice} onChange={(event) => { setSelectedDevice(event.target.value); void startCamera(event.target.value) }} disabled={connected || connecting || !devices.length}><option value="">Default camera</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}</select><small>Camera permission is requested by the system the first time you start capture. The same feed is relayed to audience output when sent Live.</small><div><button type="button" className="save-presentation-button" onClick={() => void startCamera()} disabled={connected || connecting}>{connecting ? 'Starting camera…' : 'Start camera and Preview'}</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Stop source</button></div></>}
-      {sourceMode === 'url' && <form onSubmit={connectUrl}><label htmlFor="live-feed-url">Direct stream address</label><input id="live-feed-url" type="password" autoComplete="off" spellCheck={false} placeholder="https://camera.local/live.m3u8" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} disabled={connected || connecting} /><label htmlFor="live-stream-kind">Stream format</label><select id="live-stream-kind" value={streamKind} onChange={(event) => setStreamKind(event.target.value as typeof streamKind)} disabled={connected}><option value="video">Video / HLS (WebView supported formats)</option><option value="mjpeg">MJPEG</option></select><small>Use an HTTP(S) URL that points directly to a playable stream, not a watch page. HLS and codecs vary by Windows and Linux WebView. Credentials in the URL are kept in memory only.</small><div><button type="submit" className="save-presentation-button" disabled={connected || !sourceUrl.trim()}>Connect and Preview</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Stop source</button></div></form>}
+      {sourceMode === 'url' && <form onSubmit={connectUrl}><label htmlFor="live-feed-url">Stream URL or YouTube Live link</label><div className="live-url-entry"><input id="live-feed-url" type={showUrl ? 'text' : 'password'} autoComplete="off" spellCheck={false} placeholder="Paste a YouTube live link or direct stream URL" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} disabled={connected || connecting} /><button type="button" onClick={() => setShowUrl((visible) => !visible)} aria-label={showUrl ? 'Hide stream URL' : 'Show stream URL'}>{showUrl ? 'Hide' : 'Show'}</button></div>{pastedYoutubeId ? <small>YouTube link detected. BibleShow will use YouTube’s embedded player; the direct-stream format below does not apply. Playback may be unavailable if the stream owner disables embedding or YouTube restricts this stream.</small> : <><label htmlFor="live-stream-kind">Direct stream format</label><select id="live-stream-kind" value={streamKind} onChange={(event) => setStreamKind(event.target.value as typeof streamKind)} disabled={connected}><option value="video">Video / HLS (WebView supported formats)</option><option value="mjpeg">MJPEG</option></select><small>Use an HTTP(S) URL that points directly to a playable stream, not a watch page. HLS and codecs vary by Windows and Linux WebView. Credentials in the URL stay in memory only.</small></>}<div><button type="submit" className="save-presentation-button" disabled={connected || !sourceUrl.trim()}>Connect and Preview</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Stop source</button></div></form>}
       {sourceMode === 'rtsp' && <><label htmlFor="live-feed-rtsp-url">RTSP / RTSPS address</label><input id="live-feed-rtsp-url" type="password" autoComplete="off" spellCheck={false} placeholder="rtsp://camera.local:554/stream" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} disabled={connected || connecting} /><small>This experimental receiver depends on GStreamer installed on this computer.</small><div><button type="button" className="save-presentation-button" onClick={() => { setConnecting(true); void onConnect(sourceUrl.trim()).finally(() => setConnecting(false)) }} disabled={connected || connecting || !sourceUrl.trim()}>{connecting ? 'Connecting…' : 'Connect and Preview'}</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Stop source</button></div></>}
     </div>
     {feedError && <p className="source-error" role="alert">{feedError}</p>}
-    {activeSlide && <div className="network-live-preview">{activeSlide.liveStreamKind === 'camera' ? <video ref={localVideo} autoPlay muted playsInline /> : activeSlide.liveStreamKind === 'mjpeg' ? <img src={activeSlide.liveStreamUrl} alt="Live MJPEG feed" onError={() => setFeedError('The MJPEG endpoint could not be loaded. Check the URL and camera network settings.')} /> : <video src={activeSlide.liveStreamUrl} autoPlay muted playsInline onError={() => setFeedError('This stream could not play in the current WebView. Check the URL, format and codec support.')} />}<div><button onClick={() => onPreview(activeSlide)}>Stage in Preview</button><button className="save-presentation-button" onClick={() => onSendLive(activeSlide)}>Send Live</button><button onClick={() => void onStop()}>Stop source</button></div></div>}
+    {activeSlide && <div className="network-live-preview">{activeSlide.liveStreamKind === 'camera' ? <video ref={localVideo} autoPlay muted playsInline /> : activeSlide.liveStreamKind === 'youtube' && activeSlide.youtubeVideoId ? <iframe src={youtubeEmbedUrl(activeSlide.youtubeVideoId, true)} title="YouTube Live preview" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /> : activeSlide.liveStreamKind === 'mjpeg' ? <img src={activeSlide.liveStreamUrl} alt="Live MJPEG feed" onError={() => setFeedError('The MJPEG endpoint could not be loaded. Check the URL and camera network settings.')} /> : <video src={activeSlide.liveStreamUrl} autoPlay muted playsInline onError={() => setFeedError('This stream could not play in the current WebView. Check the URL, format and codec support.')} />}<div><button onClick={() => onPreview(activeSlide)}>Stage in Preview</button><button className="save-presentation-button" onClick={() => onSendLive(activeSlide)}>Send Live</button><button onClick={() => void onStop()}>Stop source</button></div></div>}
     {!activeSlide && <p className="network-live-empty">Choose a camera or direct stream source. One Live Feed source can be active at a time.</p>}
   </section>
 }
@@ -1048,6 +1075,7 @@ function SlideScreen({ slide, cameraStream, emptyLabel }: { slide: PresentationS
   if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /><strong>{slide.reference}</strong></article>
   if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><video src={convertFileSrc(slide.mediaPath)} autoPlay loop muted playsInline /><strong>{slide.reference}</strong></article>
   if (slide.kind === 'live' && slide.liveStreamKind === 'camera') return <article className="operator-screen video-screen"><LiveVideo stream={cameraStream} label="Live camera feed" /></article>
+  if (slide.kind === 'live' && slide.liveStreamKind === 'youtube' && slide.youtubeVideoId) return <article className="operator-screen video-screen"><iframe src={youtubeEmbedUrl(slide.youtubeVideoId, true)} title="YouTube Live preview" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article>
   if (slide.kind === 'live' && slide.liveStreamUrl) return <article className="operator-screen video-screen">{slide.liveStreamKind === 'mjpeg' ? <img src={slide.liveStreamUrl} alt="Live MJPEG feed" /> : <video src={slide.liveStreamUrl} autoPlay muted playsInline />}</article>
   return <article className={`operator-screen ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{slide.subtitle}</span><p>{slide.body}</p><strong>{slide.reference}</strong></article>
 }
@@ -1109,7 +1137,7 @@ export function AudienceWindow() {
   }, [cameraSourceId])
 
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><video src={convertFileSrc(snapshot.slide.mediaPath)} autoPlay loop muted playsInline /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><video src={convertFileSrc(snapshot.slide.mediaPath)} autoPlay loop muted playsInline /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
   </main>
 }
