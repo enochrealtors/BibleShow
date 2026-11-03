@@ -26,11 +26,12 @@ type ImportSummary = {
 }
 
 type BookSummary = { book_number: number; name: string; chapter_count: number }
+type TranslationSummary = { id: string; name: string; language: string }
 type ChapterData = { book_number: number; name: string; chapter_number: number; chapter_count: number; verses: { verse_number: number; text: string }[] }
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
-type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
+type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; translationId?: string; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
 type QueuedSlide = PresentationSlide & { queueId: string }
 type MediaFile = { id: string; filename: string; mediaType: 'image' | 'video'; mimeType: string; localPath: string; fileSize: number }
 type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null }
@@ -66,7 +67,7 @@ const presentationFeedLabels: Record<PresentationFeed, string> = {
 }
 
 function persistedSlides(slides: readonly PresentationSlide[]) {
-  return slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex, mediaId }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex, mediaId }))
+  return slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId }))
 }
 
 function projectSnapshot(title: string, slides: readonly PresentationSlide[]) {
@@ -164,7 +165,7 @@ function App() {
         </header>}
 
         <div className={`page-content${page === 'presentation' ? ' page-content-presentation' : ''}`}>
-          {page === 'home' && <HomePage onNavigate={setPage} library={library} importState={importState} onImport={importLibrary} />}
+          {page === 'home' && <HomePage onNavigate={setPage} library={library} importState={importState} onImport={importLibrary} onRefreshLibrary={() => invoke<LibrarySummary>('get_library_summary').then(setLibrary)} />}
           {page === 'presentation' && <PresentationWorkspace onBack={() => setPage('home')} />}
           {page !== 'presentation' && <footer className="app-footer"><span>BibleShow</span><span>Built for worship and presentation</span><span className="footer-version">EARLY ACCESS</span></footer>}
         </div>
@@ -173,7 +174,7 @@ function App() {
   )
 }
 
-function HomePage({ onNavigate, library, importState, onImport }: { onNavigate: (page: Page) => void; library: LibrarySummary | null; importState: { busy: boolean; message: string; error: boolean }; onImport: (file?: File) => void }) {
+function HomePage({ onNavigate, library, importState, onImport, onRefreshLibrary }: { onNavigate: (page: Page) => void; library: LibrarySummary | null; importState: { busy: boolean; message: string; error: boolean }; onImport: (file?: File) => void; onRefreshLibrary: () => void }) {
   return (
     <>
       <section className="welcome-row">
@@ -184,6 +185,8 @@ function HomePage({ onNavigate, library, importState, onImport }: { onNavigate: 
         </div>
         <div className="date-chip"><span className="date-dot" /> Designed to work without internet</div>
       </section>
+
+      <ResourceImportPanel onImported={onRefreshLibrary} />
 
       <section className="workspace-grid single-workspace-grid" aria-label="Presentation workspace">
         <button className="workspace-card presentation-card" onClick={() => onNavigate('presentation')}>
@@ -224,6 +227,51 @@ function HomePage({ onNavigate, library, importState, onImport }: { onNavigate: 
       </section>
     </>
   )
+}
+
+function ResourceImportPanel({ onImported }: { onImported: () => void }) {
+  const [translationId, setTranslationId] = useState('')
+  const [translationName, setTranslationName] = useState('')
+  const [language, setLanguage] = useState('en')
+  const [category, setCategory] = useState<'hymn' | 'song'>('hymn')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState(false)
+
+  async function importFiles(kind: 'bible' | 'lyrics', selected: FileList | null) {
+    if (!selected?.length) return
+    setBusy(true); setMessage('Reading selected files…'); setError(false)
+    try {
+      const files = await Promise.all(Array.from(selected).map(async (file) => ({ filename: file.name, content: await file.text() })))
+      const payload = kind === 'bible'
+        ? { id: translationId, name: translationName, language, files }
+        : { category, files }
+      const command = kind === 'bible' ? 'import_bible_resources' : 'import_lyrics_resources'
+      const result = await invoke<{ imported: number; skipped: number; detail: string }>(command, new TextEncoder().encode(JSON.stringify(payload)))
+      setMessage(result.detail); onImported()
+    } catch (reason) { setMessage(String(reason)); setError(true) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="library-panel resource-import-panel" aria-labelledby="resource-import-heading">
+    <div className="library-copy">
+      <div className="section-heading"><div><span className="section-icon"><Icon name="plus" size={17} /></span><h2 id="resource-import-heading">Add library resources</h2></div><span className="muted-label">OFFLINE IMPORT</span></div>
+      <p className="library-status">Add more Bible versions or bring in song libraries. Supports USFM/USX, OSIS and Zefania Bible files; OpenLyrics/OpenSong XML, TXT and CSV lyrics.</p>
+      {message && <p className={`import-message${error ? ' is-error' : ''}`} role="status">{message}</p>}
+      <div className="resource-import-fields">
+        <fieldset disabled={busy || !isTauri()}><legend>Bible version</legend>
+          <input aria-label="Translation code" placeholder="Code (for example, ESV)" value={translationId} onChange={(event) => setTranslationId(event.target.value)} />
+          <input aria-label="Translation name" placeholder="Version name" value={translationName} onChange={(event) => setTranslationName(event.target.value)} />
+          <input aria-label="Language code" placeholder="Language (en)" value={language} onChange={(event) => setLanguage(event.target.value)} />
+          <label className="import-button"><span>{busy ? 'Importing…' : 'Choose Bible files'}</span><input type="file" accept=".usfm,.sfm,.usx,.xml,.osis" multiple disabled={busy || !isTauri()} onChange={(event) => { void importFiles('bible', event.currentTarget.files); event.currentTarget.value = '' }} /></label>
+        </fieldset>
+        <fieldset disabled={busy || !isTauri()}><legend>Lyrics</legend>
+          <select aria-label="Default lyrics category" value={category} onChange={(event) => setCategory(event.target.value as 'hymn' | 'song')}><option value="hymn">Hymns</option><option value="song">Songs</option></select>
+          <label className="import-button"><span>{busy ? 'Importing…' : 'Choose lyrics files'}</span><input type="file" accept=".xml,.ost,.txt,.csv" multiple disabled={busy || !isTauri()} onChange={(event) => { void importFiles('lyrics', event.currentTarget.files); event.currentTarget.value = '' }} /></label>
+        </fieldset>
+      </div>
+    </div>
+  </section>
 }
 
 function PresentationWorkspace({ onBack }: { onBack: () => void }) {
@@ -856,6 +904,8 @@ function MonitorPanel({ type, slide, cameraStream, alert, emptyLabel, onPrevious
 
 function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSourceId, searchRequest }: { onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onAdd: (slide: PresentationSlide) => void; onAddMany: (slides: PresentationSlide[]) => void; previewSourceId: string | null; searchRequest: { mode: 'reference' | 'keyword'; query: string; id: number } | null }) {
   const [books, setBooks] = useState<BookSummary[]>([])
+  const [translations, setTranslations] = useState<TranslationSummary[]>([])
+  const [translationId, setTranslationId] = useState('KJV')
   const [bookNumber, setBookNumber] = useState(1)
   const [chapterNumber, setChapterNumber] = useState(1)
   const [verseNumber, setVerseNumber] = useState(1)
@@ -869,23 +919,30 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
   const activeBook = books.find((book) => book.book_number === bookNumber)
   const currentChapter = chapter?.book_number === bookNumber && chapter.chapter_number === chapterNumber ? chapter : null
   const verse = currentChapter?.verses.find((item) => item.verse_number === verseNumber)
-  const slide = verse && currentChapter ? { sourceId: `kjv:${bookNumber}:${chapterNumber}:${verseNumber}`, title: `${currentChapter.name} ${chapterNumber}:${verseNumber}`, subtitle: 'King James Version', body: verse.text, reference: `${currentChapter.name} ${chapterNumber}:${verseNumber}`, kind: 'scripture' as const, bookNumber, chapterNumber, verseNumber } : null
+  const slide = verse && currentChapter ? { sourceId: `${translationId}:${bookNumber}:${chapterNumber}:${verseNumber}`, title: `${currentChapter.name} ${chapterNumber}:${verseNumber}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: verse.text, reference: `${currentChapter.name} ${chapterNumber}:${verseNumber}`, kind: 'scripture' as const, translationId, bookNumber, chapterNumber, verseNumber } : null
   const displayError = error || (!isTauri() ? 'Open the desktop app to access the local Bible.' : '')
   const keywordResultsOpen = searchRequest?.mode === 'keyword' && Boolean(searchMessage)
 
   useEffect(() => {
     if (!isTauri()) return
     let active = true
-    invoke<BookSummary[]>('get_bible_books').then((items) => { if (active) { setBooks(items); if (!items.length) setError('Import the KJV package from Home first.') } }).catch((reason) => { if (active) setError(String(reason)) })
+    invoke<TranslationSummary[]>('get_bible_translations').then((items) => { if (active) { setTranslations(items); const selected = items.find((item) => item.id === translationId)?.id ?? items[0]?.id ?? 'KJV'; setTranslationId(selected); return invoke<BookSummary[]>('get_bible_books', { translationId: selected }) } }).then((items) => { if (active && items) { setBooks(items); if (!items.length) setError('Import a Bible version from Home first.') } }).catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
-  }, [])
+  }, [translationId])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    invoke<BookSummary[]>('get_bible_books', { translationId }).then((items) => { if (active) { setBooks(items); setBookNumber(items[0]?.book_number ?? 1); setChapterNumber(1) } }).catch((reason) => { if (active) setError(String(reason)) })
+    return () => { active = false }
+  }, [translationId])
 
   useEffect(() => {
     if (!books.length) return
     let active = true
-    invoke<ChapterData>('get_bible_chapter', { bookNumber, chapterNumber }).then((result) => { if (active) { setChapter(result); const pending = pendingRange.current; const maxVerse = result.verses.at(-1)?.verse_number ?? 1; if (pending) { const start = Math.min(pending[0], maxVerse); const end = Math.max(start, Math.min(pending[1], maxVerse)); setVerseNumber(start); setRangeStart(start); setRangeEnd(end); pendingRange.current = null } else { setVerseNumber(1); setRangeStart(1); setRangeEnd(1) } setError('') } }).catch((reason) => { if (active) setError(String(reason)) })
+    invoke<ChapterData>('get_bible_chapter', { translationId, bookNumber, chapterNumber }).then((result) => { if (active) { setChapter(result); const pending = pendingRange.current; const maxVerse = result.verses.at(-1)?.verse_number ?? 1; if (pending) { const start = Math.min(pending[0], maxVerse); const end = Math.max(start, Math.min(pending[1], maxVerse)); setVerseNumber(start); setRangeStart(start); setRangeEnd(end); pendingRange.current = null } else { setVerseNumber(1); setRangeStart(1); setRangeEnd(1) } setError('') } }).catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
-  }, [books.length, bookNumber, chapterNumber])
+  }, [books.length, bookNumber, chapterNumber, translationId])
 
   useEffect(() => {
     if (!searchRequest || !books.length) return
@@ -896,7 +953,7 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
       setSearchMessage('Searching…')
       if (searchRequest.mode === 'keyword') {
         try {
-          const results = await invoke<BibleSearchResult[]>('search_bible_keyword', { query: searchRequest.query })
+          const results = await invoke<BibleSearchResult[]>('search_bible_keyword', { translationId, query: searchRequest.query })
           if (active) { setSearchResults(results); setSearchMessage(results.length ? `${results.length} matching verses` : 'No matching verses found.') }
         } catch (reason) { if (active) setSearchMessage(String(reason)) }
         return
@@ -915,11 +972,11 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
     return () => { active = false }
     // The request ID and loaded library define the search; chapter state is only used to avoid a refetch for an already-open passage.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchRequest?.id, books.length])
+  }, [searchRequest?.id, books.length, translationId])
 
   function makeVerseSlide(item: { verse_number: number; text: string }, chapterData = currentChapter): PresentationSlide | null {
     if (!chapterData) return null
-    return { sourceId: `kjv:${chapterData.book_number}:${chapterData.chapter_number}:${item.verse_number}`, title: `${chapterData.name} ${chapterData.chapter_number}:${item.verse_number}`, subtitle: 'King James Version', body: item.text, reference: `${chapterData.name} ${chapterData.chapter_number}:${item.verse_number}`, kind: 'scripture', bookNumber: chapterData.book_number, chapterNumber: chapterData.chapter_number, verseNumber: item.verse_number }
+    return { sourceId: `${translationId}:${chapterData.book_number}:${chapterData.chapter_number}:${item.verse_number}`, title: `${chapterData.name} ${chapterData.chapter_number}:${item.verse_number}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: item.text, reference: `${chapterData.name} ${chapterData.chapter_number}:${item.verse_number}`, kind: 'scripture', translationId, bookNumber: chapterData.book_number, chapterNumber: chapterData.chapter_number, verseNumber: item.verse_number }
   }
 
   function selectSearchResult(result: BibleSearchResult) {
@@ -935,7 +992,7 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
         setRangeEnd(result.verse_number)
       } else pendingRange.current = [result.verse_number, result.verse_number]
     }
-    const resultSlide: PresentationSlide = { sourceId: `kjv:${result.book_number}:${result.chapter_number}:${result.verse_number}`, title: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, subtitle: 'King James Version', body: result.text, reference: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, kind: 'scripture', bookNumber: result.book_number, chapterNumber: result.chapter_number, verseNumber: result.verse_number }
+    const resultSlide: PresentationSlide = { sourceId: `${translationId}:${result.book_number}:${result.chapter_number}:${result.verse_number}`, title: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: result.text, reference: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, kind: 'scripture', translationId, bookNumber: result.book_number, chapterNumber: result.chapter_number, verseNumber: result.verse_number }
     onPreview(resultSlide)
   }
 
@@ -943,11 +1000,12 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
     <div className="source-browser">
       {keywordResultsOpen ? <div className="bible-search-results expanded"><span>{searchMessage}</span>{searchResults.map((result) => <button key={`${result.book_number}-${result.chapter_number}-${result.verse_number}`} onClick={() => selectSearchResult(result)}><strong>{result.book_name} {result.chapter_number}:{result.verse_number}</strong><span>{result.text}</span></button>)}</div> : <>
       <div className="source-selects">
+        <label>Version<select value={translationId} onChange={(event) => setTranslationId(event.target.value)}>{translations.map((translation) => <option key={translation.id} value={translation.id}>{translation.name}</option>)}</select></label>
         <label>Book<select value={bookNumber} onChange={(event) => { setBookNumber(Number(event.target.value)); setChapterNumber(1) }} disabled={!books.length}>{books.map((book) => <option key={book.book_number} value={book.book_number}>{book.name}</option>)}</select></label>
         <label>Chapter<select value={chapterNumber} onChange={(event) => setChapterNumber(Number(event.target.value))} disabled={!activeBook}>{Array.from({ length: activeBook?.chapter_count ?? 0 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select></label>
       </div>
       <div className="passage-range"><span>Passage slides</span><label>From<select value={rangeStart} onChange={(event) => setRangeStart(Number(event.target.value))} disabled={!currentChapter}>{currentChapter?.verses.map((item) => <option key={item.verse_number} value={item.verse_number}>{item.verse_number}</option>)}</select></label><label>To<select value={rangeEnd} onChange={(event) => setRangeEnd(Number(event.target.value))} disabled={!currentChapter}>{currentChapter?.verses.filter((item) => item.verse_number >= rangeStart).map((item) => <option key={item.verse_number} value={item.verse_number}>{item.verse_number}</option>)}</select></label><button disabled={!currentChapter || rangeEnd < rangeStart} onClick={() => { const data = currentChapter; if (!data) return; const slides = data.verses.filter((item) => item.verse_number >= rangeStart && item.verse_number <= rangeEnd).map((item) => makeVerseSlide(item, data)).filter((item): item is PresentationSlide => item !== null); onAddMany(slides) }}>Add passage</button></div>
-      <div className="source-list-heading"><span>VERSE</span><span>KJV</span></div>
+      <div className="source-list-heading"><span>VERSE</span><span>{translations.find((item) => item.id === translationId)?.id ?? 'KJV'}</span></div>
       <div className="source-verse-list">{currentChapter?.verses.map((item) => {
         const verseSlide = makeVerseSlide(item)
         if (!verseSlide) return null

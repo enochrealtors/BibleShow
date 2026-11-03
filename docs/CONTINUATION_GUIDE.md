@@ -39,12 +39,15 @@ You are continuing development of **BibleShow**, an offline-first church present
 
 The Live Feed implementation now supports operator-window camera/webcam capture, a WebRTC relay of the same camera to audience output, direct HTTP(S) video/HLS and MJPEG endpoints, YouTube watch/live links via YouTube's embed player, plus the existing optional experimental RTSP/GStreamer adapter. An Ubuntu 24.04 x64 workflow now packages a Debian trial installer; run it, retrieve the artifact, and verify on the user's laptop before continuing. The code is not yet validated on Windows WebView2 or Ubuntu WebKitGTK. YouTube playback may still be blocked when the owner disables embedding or the web player requires a user click.
 
-Next, extend the resource library imports using the formats selected by the user:
+Implemented in the current checkout: resource-library imports for the formats below, with translation-aware Bible browsing and saved Scripture slides. Review `docs/RESOURCE_IMPORT_DESIGN.md` for parser boundaries and import limits. Desktop review is still required for real-world files and display formatting.
+
+After verifying imports in the desktop app, revisit Videos / Images. PNG/JPEG/GIF/WebP image import and MP4/WebM video import/playback code exists, but the user reports video uploads are not working and desktop verification is still outstanding. Diagnose and fix that workflow before broadening media formats.
+
+Formats selected by the user:
 
 - Bible: USFM/USX, OSIS and Zefania XML.
 - Lyrics: OpenLyrics, OpenSong, OpenLP export, plain text and CSV.
-- Design format detection, validation, duplicate handling, import preview, metadata/attribution and transactional rollback before altering the SQLite library.
-- After resource imports, revisit Videos / Images in the desktop app. PNG/JPEG/GIF/WebP image import and MP4/WebM video import/playback code exists, but the user reports video uploads are not working and desktop verification is still outstanding. Diagnose and fix that workflow before broadening media formats.
+- Import preview, richer metadata/attribution review, and support for additional dialects remain future improvements.
 
 Keep direct camera and browser-playable HTTP(S) endpoints as the no-GStreamer default. A webview cannot play arbitrary RTSP/NDI addresses directly; keep those in native adapters. The existing GStreamer 1.28 RTSP backend is experimental and its Windows packaging is unresolved. Keep credentials out of labels, logs, saved projects and exports.
 

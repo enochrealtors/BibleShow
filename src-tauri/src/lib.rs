@@ -1,4 +1,5 @@
 mod live_feed;
+mod resource_import;
 
 use roxmltree::{Document, Node};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -118,6 +119,22 @@ struct BookSummary {
 }
 
 #[derive(Serialize)]
+struct TranslationSummary { id: String, name: String, language: String }
+
+#[derive(Serialize)]
+struct ResourceImportSummary { imported: usize, skipped: usize, detail: String }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BibleImportRequest { id: String, name: String, language: String, files: Vec<ResourceFile> }
+
+#[derive(Deserialize)]
+struct LyricsImportRequest { category: String, files: Vec<ResourceFile> }
+
+#[derive(Deserialize)]
+struct ResourceFile { filename: String, content: String }
+
+#[derive(Serialize)]
 struct VerseItem {
     verse_number: i64,
     text: String,
@@ -188,6 +205,7 @@ struct PresentationSlideInput {
     book_number: Option<i64>,
     chapter_number: Option<i64>,
     verse_number: Option<i64>,
+    translation_id: Option<String>,
     song_id: Option<String>,
     section_index: Option<i64>,
     media_id: Option<String>,
@@ -205,6 +223,7 @@ struct SavedPresentationSlide {
     book_number: Option<i64>,
     chapter_number: Option<i64>,
     verse_number: Option<i64>,
+    translation_id: Option<String>,
     song_id: Option<String>,
     section_index: Option<i64>,
     media_id: Option<String>,
@@ -407,13 +426,6 @@ fn get_library_summary(app: tauri::AppHandle) -> Result<LibrarySummary, String> 
     }
     let mut db = Connection::open(&path).map_err(db_error)?;
     ensure_current_schema(&mut db)?;
-    let count = |table: &str| -> Result<usize, String> {
-        db.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| {
-            r.get::<_, i64>(0)
-        })
-        .map(|n| n as usize)
-        .map_err(db_error)
-    };
     let default_translation = db
         .query_row(
             "SELECT value FROM settings WHERE key='default_translation'",
@@ -422,12 +434,17 @@ fn get_library_summary(app: tauri::AppHandle) -> Result<LibrarySummary, String> 
         )
         .optional()
         .map_err(db_error)?;
+    let kjv_installed: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM translations WHERE id='KJV')", [], |row| row.get(0)).map_err(db_error)?;
+    let bible_count = |table: &str| -> Result<usize, String> {
+        db.query_row(&format!("SELECT COUNT(*) FROM {table} WHERE translation_id='KJV'"), [], |row| row.get::<_, i64>(0))
+            .map(|number| number as usize).map_err(db_error)
+    };
     Ok(LibrarySummary {
-        kjv_installed: count("translations")? > 0,
+        kjv_installed,
         default_translation,
-        books: count("bible_books")?,
-        chapters: count("bible_chapters")?,
-        verses: count("bible_verses")?,
+        books: bible_count("bible_books")?,
+        chapters: bible_count("bible_chapters")?,
+        verses: bible_count("bible_verses")?,
         hymns: db
             .query_row(
                 "SELECT COUNT(*) FROM songs WHERE category='hymn'",
@@ -447,17 +464,26 @@ fn get_library_summary(app: tauri::AppHandle) -> Result<LibrarySummary, String> 
 }
 
 #[tauri::command]
-fn get_bible_books(app: tauri::AppHandle) -> Result<Vec<BookSummary>, String> {
+fn get_bible_translations(app: tauri::AppHandle) -> Result<Vec<TranslationSummary>, String> {
+    let db = open_library(&app)?;
+    let mut statement = db.prepare("SELECT id,name,language FROM translations ORDER BY CASE WHEN id='KJV' THEN 0 ELSE 1 END,name").map_err(db_error)?;
+    statement.query_map([], |row| Ok(TranslationSummary { id: row.get(0)?, name: row.get(1)?, language: row.get(2)? }))
+        .map_err(db_error)?.collect::<Result<Vec<_>, _>>().map_err(db_error)
+}
+
+#[tauri::command]
+fn get_bible_books(app: tauri::AppHandle, translation_id: Option<String>) -> Result<Vec<BookSummary>, String> {
+    let translation_id = translation_id.unwrap_or_else(|| "KJV".into());
     let path = database_path(&app)?;
     if !path.exists() {
         return Ok(Vec::new());
     }
     let db = open_library(&app)?;
     let mut query = db
-        .prepare("SELECT b.book_number,b.name,COUNT(c.chapter_number) FROM bible_books b LEFT JOIN bible_chapters c ON c.translation_id=b.translation_id AND c.book_number=b.book_number WHERE b.translation_id='KJV' GROUP BY b.book_number,b.name ORDER BY b.book_number")
+        .prepare("SELECT b.book_number,b.name,COUNT(c.chapter_number) FROM bible_books b LEFT JOIN bible_chapters c ON c.translation_id=b.translation_id AND c.book_number=b.book_number WHERE b.translation_id=?1 GROUP BY b.book_number,b.name ORDER BY b.book_number")
         .map_err(db_error)?;
     let rows = query
-        .query_map([], |row| {
+        .query_map([translation_id], |row| {
             Ok(BookSummary {
                 book_number: row.get(0)?,
                 name: row.get(1)?,
@@ -471,28 +497,30 @@ fn get_bible_books(app: tauri::AppHandle) -> Result<Vec<BookSummary>, String> {
 #[tauri::command]
 fn get_bible_chapter(
     app: tauri::AppHandle,
+    translation_id: Option<String>,
     book_number: i64,
     chapter_number: i64,
 ) -> Result<ChapterData, String> {
+    let translation_id = translation_id.unwrap_or_else(|| "KJV".into());
     let path = database_path(&app)?;
     if !path.exists() {
-        return Err("Import the KJV content package from Home to read the Bible offline.".into());
+        return Err("Import a Bible version from Home to read Scripture offline.".into());
     }
     let db = open_library(&app)?;
     let (name, chapter_count): (String, i64) = db
         .query_row(
-            "SELECT b.name,COUNT(c.chapter_number) FROM bible_books b LEFT JOIN bible_chapters c ON c.translation_id=b.translation_id AND c.book_number=b.book_number WHERE b.translation_id='KJV' AND b.book_number=?1 GROUP BY b.book_number,b.name",
-            [book_number],
+            "SELECT b.name,COUNT(c.chapter_number) FROM bible_books b LEFT JOIN bible_chapters c ON c.translation_id=b.translation_id AND c.book_number=b.book_number WHERE b.translation_id=?1 AND b.book_number=?2 GROUP BY b.book_number,b.name",
+            params![translation_id, book_number],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(db_error)?
-        .ok_or_else(|| "That Bible book is not available. Import the KJV package from Home.".to_string())?;
+        .ok_or_else(|| "That book is not available in the selected Bible version.".to_string())?;
     let mut query = db
-        .prepare("SELECT verse_number,text FROM bible_verses WHERE translation_id='KJV' AND book_number=?1 AND chapter_number=?2 ORDER BY verse_number")
+        .prepare("SELECT verse_number,text FROM bible_verses WHERE translation_id=?1 AND book_number=?2 AND chapter_number=?3 ORDER BY verse_number")
         .map_err(db_error)?;
     let verses = query
-        .query_map(params![book_number, chapter_number], |row| {
+        .query_map(params![translation_id, book_number, chapter_number], |row| {
             Ok(VerseItem {
                 verse_number: row.get(0)?,
                 text: row.get(1)?,
@@ -502,7 +530,7 @@ fn get_bible_chapter(
         .collect::<Result<Vec<_>, _>>()
         .map_err(db_error)?;
     if chapter_number < 1 || chapter_number > chapter_count || verses.is_empty() {
-        return Err("That chapter is not available in the local KJV library.".into());
+        return Err("That chapter is not available in the selected Bible version.".into());
     }
     Ok(ChapterData {
         book_number,
@@ -514,21 +542,96 @@ fn get_bible_chapter(
 }
 
 #[tauri::command]
-fn search_bible_keyword(app: tauri::AppHandle, query: String) -> Result<Vec<BibleSearchResult>, String> {
+fn search_bible_keyword(app: tauri::AppHandle, translation_id: Option<String>, query: String) -> Result<Vec<BibleSearchResult>, String> {
     let query = query.trim();
     if query.is_empty() || query.chars().count() > 100 {
         return Err("Enter a search phrase of 1 to 100 characters.".into());
     }
     let path = database_path(&app)?;
     if !path.exists() {
-        return Err("Import the KJV content package from Home before searching.".into());
+        return Err("Import a Bible version from Home before searching.".into());
     }
     let db = open_library(&app)?;
     let pattern = format!("%{}%", query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
-    let mut statement = db.prepare("SELECT v.book_number,b.name,v.chapter_number,v.verse_number,v.text FROM bible_verses v JOIN bible_books b ON b.translation_id=v.translation_id AND b.book_number=v.book_number WHERE v.translation_id='KJV' AND v.text LIKE ?1 ESCAPE '\\' ORDER BY v.book_number,v.chapter_number,v.verse_number LIMIT 100").map_err(db_error)?;
-    statement.query_map([pattern], |row| Ok(BibleSearchResult {
+    let translation_id = translation_id.unwrap_or_else(|| "KJV".into());
+    let mut statement = db.prepare("SELECT v.book_number,b.name,v.chapter_number,v.verse_number,v.text FROM bible_verses v JOIN bible_books b ON b.translation_id=v.translation_id AND b.book_number=v.book_number WHERE v.translation_id=?1 AND v.text LIKE ?2 ESCAPE '\\' ORDER BY v.book_number,v.chapter_number,v.verse_number LIMIT 100").map_err(db_error)?;
+    statement.query_map(params![translation_id, pattern], |row| Ok(BibleSearchResult {
         book_number: row.get(0)?, book_name: row.get(1)?, chapter_number: row.get(2)?, verse_number: row.get(3)?, text: row.get(4)?,
     })).map_err(db_error)?.collect::<Result<Vec<_>, _>>().map_err(db_error)
+}
+
+fn read_resource_request<T: for<'de> Deserialize<'de>>(request: &Request<'_>, label: &str) -> Result<T, String> {
+    let bytes = match request.body() {
+        InvokeBody::Raw(bytes) => bytes.as_slice(),
+        InvokeBody::Json(_) => return Err(format!("Choose the {label} files again; their contents were not received.")),
+    };
+    if bytes.is_empty() || bytes.len() > 64 * 1024 * 1024 { return Err("The selected resources exceed the 64 MB import limit.".into()); }
+    serde_json::from_slice(bytes).map_err(|_| format!("The selected {label} data could not be read."))
+}
+
+#[tauri::command]
+fn import_bible_resources(app: tauri::AppHandle, request: Request<'_>) -> Result<ResourceImportSummary, String> {
+    let request: BibleImportRequest = read_resource_request(&request, "Bible")?;
+    let id = request.id.trim().to_ascii_uppercase();
+    let name = request.name.trim();
+    let language = request.language.trim();
+    if id.is_empty() || id.len() > 24 || !id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') || id == "KJV" {
+        return Err("Choose a unique translation code (1–24 letters, numbers, or hyphens); KJV is reserved.".into());
+    }
+    if name.is_empty() || name.chars().count() > 100 || language.is_empty() || language.len() > 16 { return Err("Enter a translation name and language code.".into()); }
+    if request.files.len() > 300 || request.files.iter().any(|file| file.content.len() > 8 * 1024 * 1024) { return Err("Choose up to 300 Bible files, each smaller than 8 MB.".into()); }
+    let files: Vec<_> = request.files.into_iter().map(|file| (file.filename, file.content)).collect();
+    let books = resource_import::parse_bible_files(&files)?;
+    let mut db = open_library(&app)?;
+    let tx = db.transaction().map_err(db_error)?;
+    let in_use: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM presentation_items WHERE translation_id=?1)", [&id], |row| row.get(0)).map_err(db_error)?;
+    if in_use { return Err("This Bible version is used by a saved presentation. Remove those Scripture slides before replacing the version.".into()); }
+    tx.execute("INSERT INTO translations(id,name,language,source_status) VALUES (?1,?2,?3,'imported') ON CONFLICT(id) DO UPDATE SET name=excluded.name,language=excluded.language,source_status='imported'", params![id,name,language]).map_err(db_error)?;
+    tx.execute("DELETE FROM bible_books WHERE translation_id=?1", [&id]).map_err(db_error)?;
+    let mut chapters = 0usize;
+    let mut verses = 0usize;
+    for book in &books {
+        tx.execute("INSERT INTO bible_books(translation_id,book_number,name) VALUES (?1,?2,?3)", params![id,book.number,book.name]).map_err(db_error)?;
+        for (chapter_number, chapter_verses) in &book.chapters {
+            tx.execute("INSERT INTO bible_chapters(translation_id,book_number,chapter_number) VALUES (?1,?2,?3)", params![id,book.number,chapter_number]).map_err(db_error)?;
+            chapters += 1;
+            for (verse_number, text) in chapter_verses {
+                tx.execute("INSERT INTO bible_verses(translation_id,book_number,chapter_number,verse_number,text) VALUES (?1,?2,?3,?4,?5)", params![id,book.number,chapter_number,verse_number,text]).map_err(db_error)?;
+                verses += 1;
+            }
+        }
+    }
+    tx.commit().map_err(db_error)?;
+    Ok(ResourceImportSummary { imported: books.len(), skipped: 0, detail: format!("Imported {name}: {} books, {chapters} chapters and {verses} verses.", books.len()) })
+}
+
+#[tauri::command]
+fn import_lyrics_resources(app: tauri::AppHandle, request: Request<'_>) -> Result<ResourceImportSummary, String> {
+    let request: LyricsImportRequest = read_resource_request(&request, "lyrics")?;
+    if request.files.len() > 300 || request.files.iter().any(|file| file.content.len() > 8 * 1024 * 1024) { return Err("Choose up to 300 lyrics files, each smaller than 8 MB.".into()); }
+    let files: Vec<_> = request.files.into_iter().map(|file| (file.filename, file.content)).collect();
+    let songs = resource_import::parse_lyrics_files(&files, &request.category)?;
+    let mut db = open_library(&app)?;
+    let tx = db.transaction().map_err(db_error)?;
+    let mut imported = 0;
+    let mut skipped = 0;
+    for (index, song) in songs.iter().enumerate() {
+        if song.sections.is_empty() { skipped += 1; continue; }
+        let stable_content = format!("{}\0{}\0{}", song.title, song.authors, song.sections.iter().map(|section| &section.2).cloned().collect::<Vec<_>>().join("\n"));
+        let digest = Sha256::digest(stable_content.as_bytes());
+        let id = format!("import:{}", digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>());
+        let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM songs WHERE id=?1)", [&id], |row| row.get(0)).map_err(db_error)?;
+        if exists { skipped += 1; continue; }
+        let source_file = format!("resource-import-{index}");
+        tx.execute("INSERT INTO songs(id,title,authors,copyright,category,source_file) VALUES (?1,?2,?3,?4,?5,?6)", params![id,song.title,song.authors,song.copyright,song.category,source_file]).map_err(db_error)?;
+        for (position, (section_type, label, lyrics)) in song.sections.iter().enumerate() {
+            tx.execute("INSERT INTO song_sections(song_id,position,section_type,label,lyrics) VALUES (?1,?2,?3,?4,?5)", params![id,position as i64,section_type,label,lyrics]).map_err(db_error)?;
+        }
+        for theme in &song.themes { tx.execute("INSERT OR IGNORE INTO song_themes(song_id,theme) VALUES (?1,?2)", params![id,theme]).map_err(db_error)?; }
+        imported += 1;
+    }
+    tx.commit().map_err(db_error)?;
+    Ok(ResourceImportSummary { imported, skipped, detail: format!("Imported {imported} lyrics resources; skipped {skipped} duplicates or empty items.") })
 }
 
 #[tauri::command]
@@ -772,7 +875,7 @@ fn save_presentation(
     };
     for (position, slide) in slides.iter().enumerate() {
         validate_presentation_slide(&tx, slide)?;
-        tx.execute("INSERT INTO presentation_items(presentation_id,position,content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", params![id,position as i64,slide.kind,slide.source_id,if slide.kind=="scripture" {Some("KJV")} else {None},slide.book_number,slide.chapter_number,slide.verse_number,slide.song_id,slide.section_index,slide.media_id,slide.title,slide.subtitle,slide.reference]).map_err(db_error)?;
+        tx.execute("INSERT INTO presentation_items(presentation_id,position,content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", params![id,position as i64,slide.kind,slide.source_id,if slide.kind=="scripture" {Some(slide.translation_id.as_deref().unwrap_or("KJV"))} else {None},slide.book_number,slide.chapter_number,slide.verse_number,slide.song_id,slide.section_index,slide.media_id,slide.title,slide.subtitle,slide.reference]).map_err(db_error)?;
     }
     tx.commit().map_err(db_error)?;
     Ok(id)
@@ -782,7 +885,8 @@ fn validate_presentation_slide(tx: &Transaction<'_>, slide: &PresentationSlideIn
     match slide.kind.as_str() {
         "scripture" => {
             let (book, chapter, verse) = (slide.book_number.ok_or("A Scripture slide is missing its book number.")?, slide.chapter_number.ok_or("A Scripture slide is missing its chapter number.")?, slide.verse_number.ok_or("A Scripture slide is missing its verse number.")?);
-            let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM bible_verses WHERE translation_id='KJV' AND book_number=?1 AND chapter_number=?2 AND verse_number=?3)", params![book,chapter,verse], |row| row.get(0)).map_err(db_error)?;
+            let translation = slide.translation_id.as_deref().unwrap_or("KJV");
+            let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM bible_verses WHERE translation_id=?1 AND book_number=?2 AND chapter_number=?3 AND verse_number=?4)", params![translation,book,chapter,verse], |row| row.get(0)).map_err(db_error)?;
             if !exists { return Err("A Scripture page refers to a verse that is not installed.".into()); }
         }
         "lyrics" => {
@@ -832,7 +936,7 @@ fn load_presentation(app: tauri::AppHandle, presentation_id: i64) -> Result<Save
             };
             (String::new(), Some(path))
         };
-        slides.push(SavedPresentationSlide { source_id,title:saved_title,subtitle,reference,kind,body,book_number,chapter_number,verse_number,song_id,section_index,media_id,media_path });
+        slides.push(SavedPresentationSlide { source_id,title:saved_title,subtitle,reference,kind,body,book_number,chapter_number,verse_number,translation_id,song_id,section_index,media_id,media_path });
     }
     Ok(SavedPresentation { id:presentation_id,title,slides })
 }
@@ -1223,7 +1327,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             import_initial_content,
+            import_bible_resources,
+            import_lyrics_resources,
             get_library_summary,
+            get_bible_translations,
             get_bible_books,
             get_bible_chapter,
             search_bible_keyword,

@@ -92,6 +92,10 @@ Versions are historical records and should be checked before major upgrades.
 - Added a three-choice unsaved-show prompt (Save and continue, Discard changes, Stay here) for leaving Presentation, starting a new show, or opening another project.
 - Implemented the Videos / Images feed: local image and MP4/WebM video import, Preview/Live output, video schema upgrade to version 5, and media references in saved presentations. Video is muted and loops in its initial playback implementation.
 - Connected the Presentations feed to saved projects, with slide browsing, Preview/Live selection, and add-one/add-all actions.
+- Added multi-file import for USFM/SFM, USX, OSIS and Zefania Bible resources, plus OpenLyrics/OpenSong/OpenLP XML, TXT and CSV lyrics. Imports parse before writing and commit as a transaction; exact lyric duplicates are skipped.
+- Added translation selection to the Bible feed, keyword search, and persisted Scripture slides. KJV remains the default version.
+- Added `docs/RESOURCE_IMPORT_DESIGN.md` with format support, import limits, parser boundaries and desktop-review notes.
+- Frontend and Rust compile checks are in progress; imported multi-version data and formatting still need review in the desktop app. The build was intentionally kept at the library-import stage while desktop packaging is deferred.
 
 ### Desktop foundation
 - Tauri 2 initialised.

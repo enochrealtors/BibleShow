@@ -263,6 +263,7 @@ Current implementation snapshot:
 - [x] Desktop application launched successfully.
 - [~] BibleShow operator interface implemented; desktop review continues.
 - [~] Bible Engine supports local KJV import, reference/range and keyword search in the presentation workflow.
+- [~] Resource library imports support USFM/SFM, USX, OSIS, Zefania, OpenLyrics, OpenSong/OpenLP XML, TXT and CSV; desktop import review remains.
 - [~] Presentation Engine supports the operator sequence, Preview/Live, saved projects and fullscreen audience output; runtime review continues.
 - [~] Media Engine supports local image/video sources and an RTSP receiver; desktop playback and Windows GStreamer packaging remain.
 - [ ] Detection Engine implemented.
