@@ -2,7 +2,7 @@
 
 **Document version:** 1.0
 **Last updated:** 2 November 2026
-**Status:** Initial conceptual design; implementation pending.
+**Status:** Initial local KJV/song schema implemented; SQLite schema version 2 adds saved presentations.
 
 ---
 
@@ -10,12 +10,7 @@
 
 This document defines the proposed data architecture for BibleShow.
 
-BibleShow must support two interconnected workspaces:
-
-1. Bible Study Mode.
-2. Church Presentation Mode.
-
-Both must use one shared Bible data engine.
+BibleShow supports one primary operator workspace: Church Presentation. Bible text is stored locally as a source library for selecting and displaying Scripture; this database plan does not include a personal Bible study workspace.
 
 The database must support offline operation, future cloud synchronisation and long-term expansion.
 
@@ -29,7 +24,6 @@ SQLite.
 Purpose:
 - Store Bible translations.
 - Store books, chapters and verses.
-- Store personal notes and bookmarks.
 - Store songs and presentations.
 - Store media metadata.
 - Support offline operation.
@@ -116,39 +110,7 @@ Proposed fields:
 
 A verse must be uniquely identifiable within its Bible version, book, chapter and verse number.
 
-## 5. PERSONAL BIBLE STUDY DATA
-
-### user_profiles
-
-Stores local user profile information and, where applicable, cloud account references.
-
-### workspaces
-
-Stores personal or shared workspaces.
-
-### bookmarks
-
-Stores bookmarked Bible references.
-
-### highlights
-
-Stores highlighted passages and selected highlight colours.
-
-### study_notes
-
-Stores personal notes associated with Bible references.
-
-### reading_plans
-
-Stores reading plan definitions.
-
-### reading_progress
-
-Tracks a user's progress through a reading plan.
-
-Personal study information must remain separate from Bible translation content.
-
-## 6. PRESENTATION DATA
+## 5. PRESENTATION DATA
 
 ### presentations
 
@@ -287,8 +249,6 @@ Conceptual relationships:
 - One Bible version contains many Bible chapters and verses.
 - One Bible book contains many chapters.
 - One chapter contains many verses.
-- A user can have many workspaces.
-- A workspace can contain many notes and bookmarks.
 - A presentation can contain many slides.
 - A playlist can contain many ordered items.
 - A song can contain many song sections.
@@ -366,13 +326,15 @@ The following decisions remain open:
 - Media storage strategy.
 - Data migration framework.
 
-**Governing principle:** The database must support both Bible Study and Church Presentation without creating separate Bible content systems.
+**Governing principle:** Keep imported Scripture source data centralized and let presentation items reference it rather than copying verse text.
 
 ---
 
 ## 15. Initial Local Schema Proposal
 
-This section refines the conceptual entities above into a first SQLite schema plan. It is a design proposal, not an implemented migration. The selected Rust SQLite driver and migration tool remain open.
+This section records the implemented local SQLite schema. The current database uses version 2; migrations are applied by the Rust SQLite layer when the library opens or content is imported.
+
+The implementation's table names and reference fields are simpler than the conceptual model above. Keep this section aligned with the actual schema as it evolves.
 
 ### `bible_translations`
 
@@ -414,15 +376,6 @@ Store source-native verse segments, including source labels and sequence:
 
 The composite foreign key `(translation_id, book_id, chapter_number)` references `bible_chapters`. Add an index on `(translation_id, book_id, chapter_number, verse_start)` for reference lookup. Do not assume a verse in one edition always maps one-to-one to a verse in another edition.
 
-### Personal study records
-
-Keep personal records separate from translation content:
-- `bookmarks`: UUID, passage coordinates, optional label, created/updated timestamps.
-- `highlights`: UUID, passage coordinates, color token, created/updated timestamps.
-- `study_notes`: UUID, passage coordinates, title/body, created/updated timestamps.
-
-Passage coordinates should use a stable book code, chapter, start/end verse labels, and a versification identifier. Store an optional translation preference separately; personal records must not copy verse text. UUIDs and timestamps make later backup/synchronization design possible. Deletion/sync markers can be added through a versioned migration when synchronization is designed.
-
 ### Presentation references
 
 Scripture slides should store a book code, chapter, verse range, versification identifier, and selected translation ID. Resolve the displayed words from `bible_verses` at render time rather than copying text into the slide record. A later presentation export format may embed a snapshot when portability requires it, subject to the translation's rights.
@@ -438,13 +391,21 @@ Scripture slides should store a book code, chapter, verse range, versification i
 - Import into a staging transaction, verify book/chapter/segment counts and source checksum, then mark a translation installed.
 - Keep downloaded source archives out of Git unless distribution rights and repository size have been reviewed; the application may provide an import path for a user-supplied archive.
 
+### Implemented schema version 2
+
+- Version 1 stores translations, Bible books/chapters/verses, songs, ordered song sections, song themes, settings, and import checksums.
+- Version 2 adds `presentations` and ordered `presentation_items`.
+- A presentation item stores either KJV verse coordinates or a song ID and section position. Its displayed body is resolved from the local Bible or song tables when loaded; the item does not duplicate the source text.
+- Foreign keys and checks constrain references, content kinds, and required coordinate fields. Foreign-key enforcement is enabled on library connections.
+- Schema updates are transactional and older version-1 libraries are upgraded when opened.
+
 ## 17. Design Decisions Still Open
 
 - Rust SQLite driver and migration framework.
 - Canonical reference model and mapping strategy for cross-translation comparison.
 - Whether imported Bible text is bundled in the installer or installed from a separate signed data package.
 - Full-text search implementation and Unicode normalization policy.
-- Final passage-coordinate representation for personal notes and highlights.
+- Final Scripture reference and versification model for presentation items.
 
 Do not implement cross-translation comparison until the versification mapping approach has been specified.
 

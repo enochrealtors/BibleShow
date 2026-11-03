@@ -23,3 +23,7 @@ serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 tauri = { version = "2.12.5", features = [] }
 tauri-plugin-log = "2"
+roxmltree = "0.21.2"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+zip = { version = "9.2.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+sha2 = "0.11.1"

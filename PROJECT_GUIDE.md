@@ -2,9 +2,9 @@
 
 **Document version:** 1.0  
 **Project name:** BibleShow  
-**Product type:** Desktop Bible Study and Church Presentation Application  
+**Product type:** Desktop Church Presentation Application with integrated Bible, lyric and media sources
 **Development approach:** Local-first, modular, open-source-first  
-**Current stage:** Foundation and initial application setup  
+**Current stage:** Early presentation operator workspace and evolving layout design
 **Status:** Active development
 
 ---
@@ -13,16 +13,9 @@
 
 ## 1.1 What is BibleShow?
 
-BibleShow is a desktop application designed to combine two major functions:
+BibleShow is a desktop church presentation application for services, worship, Bible teaching, conferences and other live events. It brings Scripture, lyrics, presentations and media into one operator-led show workflow.
 
-1. A comprehensive personal Bible study application.
-2. A professional church presentation application.
-
-The long-term goal is to deliver an integrated experience inspired by the strengths of applications such as FreeShow and ProPresenter, while introducing intelligent Scripture recognition and a dedicated Bible study environment.
-
-BibleShow should provide an excellent experience for individual Bible readers, Bible teachers, pastors, worship teams, church media operators and congregations.
-
-It must not become merely a Bible reader with presentation features added as an afterthought. Both functions are equally important parts of the product.
+The product should take inspiration from strengths in FreeShow and ProPresenter while remaining local-first, accessible and maintainable. The KJV and other licensed Bible content are presentation sources. BibleShow is not planned as a general-purpose or personal Bible study application.
 
 ## 1.2 Core product philosophy
 
@@ -35,7 +28,7 @@ BibleShow must be:
 - User-friendly: powerful features must remain accessible to beginners.
 - Open-source-first: prefer free and maintainable technologies.
 - Copyright-conscious: Bible translations and media must be used according to their licences.
-- Consistent: Bible Study and Presentation must share the same Bible data engine.
+- Scripture-aware: Bible references and translations must be handled consistently across content selection, slide preparation and live presentation.
 
 ## 1.3 Development principle
 
@@ -47,56 +40,13 @@ Every major feature must be designed, implemented, tested and documented before 
 
 ---
 
-# 2. THE TWO MAIN OPERATING MODES
+# 2. CHURCH PRESENTATION WORKSPACE
 
-BibleShow must have two distinct but interconnected workspaces.
+BibleShow has one primary workspace: the operator-led church presentation environment. Scripture, lyrics, saved projects, media and display controls are parts of this workflow rather than separate study and presentation modes.
 
-## 2.1 Bible Study Mode
+## 2.1 Presentation Workspace
 
-This workspace is intended for personal reading, research, teaching preparation and Scripture study.
-
-Required capabilities:
-
-### Bible navigation
-- Browse all available Bible books.
-- Navigate chapters and verses.
-- Search by book, chapter and verse.
-- Navigate between Old and New Testament.
-- Support multiple Bible translations.
-- Compare translations side by side.
-- Display verse references clearly.
-
-### Reading and study
-- Highlight verses using different colours.
-- Create personal notes.
-- Bookmark verses and passages.
-- Organise bookmarks into collections.
-- Maintain reading history.
-- Create personal reading plans.
-- Track reading progress.
-- Search by keyword and phrase.
-- Search topics and related Scriptures.
-- Cross-reference related passages.
-- View contextual information where available.
-
-### Study tools
-- Parallel Bible comparison.
-- Chapter and passage context.
-- Personal study notes.
-- Scripture collections.
-- Thematic Bible searches.
-- Future concordance and Bible dictionary integration.
-- Future commentaries and study resources, subject to licensing.
-
-### Personal organisation
-- Save study sessions.
-- Organise notes and collections.
-- Export personal notes where appropriate.
-- Backup and restore personal data.
-
-## 2.2 Church Presentation Mode
-
-This workspace is designed for church services, Bible studies, worship sessions, conferences and other live presentations.
+This workspace is designed for church services, worship sessions, Bible teaching, conferences and other live presentations.
 
 ### Scripture presentation
 - Select Bible translations.
@@ -150,26 +100,38 @@ This workspace is designed for church services, Bible studies, worship sessions,
 - Future remote control through a phone or browser.
 - Future OBS integration.
 
-### Operator workspace
+### Operator workspace layout — evolving direction
 
-The presentation workspace should eventually support a layout with:
+The presentation workspace is planned as a resizable four-area operator layout, beneath a top toolbar:
 
-- Left panel: Bible, songs, media and search.
-- Centre panel: presentation preview and live output.
-- Right panel: playlist and slide thumbnails.
-- Bottom controls: live presentation controls and display management.
+1. **Left panel — projects and service order:** Show created or imported presentation projects and the items arranged for the current show. Operators should be able to add items to the show, including by drag and drop where appropriate. Before a temporary show is discarded on close, offer to save it as a reusable project, following the familiar project workflow of EasyWorship.
+2. **Centre upper panel — Preview and Live:** Keep Preview and Live visible together. Preview shows the selected or staged item; Live shows what the audience currently sees. Selecting or browsing Bible and lyric content must populate Preview without changing Live. Sending the selection to Live must require an explicit action. Include other operator information here when it helps prepare the next item.
+3. **Centre lower panel — content feed:** Provide browsable feeds for the types of content that can be added to a show: Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Video/Images, Themes, Functions, Overlays, and further categories as the product grows. Selecting a feed should expose the appropriate items and selection controls for that content type.
+4. **Right panel — display controls:** Provide display/output controls, including clearing individual displayed items, closing an output, and managing message alerts. Alerts should support both scrolling and static presentation.
 
-The interface must remain adaptable to different screen sizes.
+The left and right panels span the work area's height. The centre is divided into upper and lower areas. Each area should be resizable so operators can allocate space to the task at hand. Preserve a responsive and usable fallback for smaller windows; the desktop operator layout remains the primary target.
 
-## 2.3 Connection between the two modes
+### Top toolbar
 
-Both workspaces must use one shared Bible data engine.
+Provide a top toolbar for application-wide and workspace commands, including Profile, Edit, View, Settings, Connections, and Plugins. These are initial headings, not a final menu specification. Brainstorm and agree the sub-items for each heading when that area is designed; do not pre-emptively add detailed menu trees. More toolbar items and workspace categories may be added as development reveals needs.
 
-A user studying a passage should be able to send it directly into a presentation.
+### Evolving design agreement
 
-A presentation operator should be able to access Bible navigation, translation comparison and relevant study information without maintaining a separate Bible database.
+This layout is the current working direction, not a frozen specification. Record additional operator suggestions here as they arrive. Before implementing each content feed, display control, or toolbar area, define its sub-items and behavior with the user. Keep a clear distinction between planned design and features that are actually implemented and verified.
 
-Notes, bookmarks and study information must not be confused with public presentation content.
+### Preview and Live behavior
+
+- Preview is the operator's staging area for the selected slide or content. Browsing the Bible, changing a verse, or selecting another song section must not silently change what the audience sees.
+- Live is the audience-facing output. Sending content from Preview to Live requires an explicit operator action such as Go Live or Take.
+- Keep Preview navigation separate from Live navigation. The operator must be able to prepare upcoming content while the current Live slide stays on screen.
+- Show the current Live item and the selected Preview item clearly; provide a next-slide preview when a playlist is present.
+- Support a separate resizable Live output window before physical projector and multiple-monitor support is available.
+- Present Bible verses and individual song sections as slide-sized pages, preserving source ordering and readable text layout.
+- Make content selection visible and actionable: choosing a Bible verse or lyric section must populate the selected/staged Preview item and make it available to add to the current show; the operator then explicitly sends it Live.
+
+This operator workflow is informed by the official [FreeShow output workflow](https://freeshow.app/docs/output) and [ProPresenter interface guide](https://support.renewedvision.com/hc/en-us/articles/360041345954-Understanding-The-ProPresenter-User-Interface). These are product references for preview, live output and operator control.
+
+The Bible source system remains focused on fast reference lookup and selecting verses for presentation. Do not expand it into a general-purpose study workspace without a future, explicit change to this product direction.
 
 ---
 
@@ -296,9 +258,8 @@ Responsible for:
 - Bible versions.
 - Books, chapters and verses.
 - Bible navigation.
-- Scripture search.
-- Translation comparison.
-- Bookmarks, highlights and notes.
+- Fast reference and passage lookup for presentation.
+- Translation selection where content rights and available data permit.
 
 ### Presentation Engine
 Responsible for:
@@ -342,7 +303,7 @@ These engines should communicate through clear interfaces rather than being tigh
 
 # 5. DATABASE DESIGN
 
-The database must support both operating modes and future expansion.
+The database supports presentation content and future expansion.
 
 Initial conceptual entities include:
 
@@ -351,15 +312,6 @@ Initial conceptual entities include:
 - bible_books
 - bible_chapters
 - bible_verses
-
-### Personal study
-- users
-- workspaces
-- bookmarks
-- highlights
-- study_notes
-- reading_plans
-- reading_progress
 
 ### Presentation
 - presentations
@@ -391,7 +343,7 @@ This is a conceptual starting point, not a final database schema.
 
 Before implementation, relationships, indexes, identifiers, data ownership and migration strategies must be designed.
 
-Do not create duplicate Bible tables for Study Mode and Presentation Mode.
+Keep imported Bible source data centralized and let presentation items reference it rather than copying verse text.
 
 ---
 
@@ -401,12 +353,8 @@ BibleShow must remain useful without internet access.
 
 Essential offline capabilities should include:
 
-- Bible reading.
-- Bible navigation.
-- Translation comparison using locally available versions.
-- Personal notes.
-- Bookmarks.
-- Highlights.
+- Bible reference and verse selection for presentation.
+- Locally installed, licensed Bible content.
 - Songs.
 - Presentations.
 - Playlists.
@@ -469,9 +417,7 @@ Design priorities:
 - Clear feedback for user actions.
 - Minimal unnecessary complexity.
 
-The two main workspaces should be clearly distinguishable.
-
-Users must be able to switch between Bible Study and Church Presentation without losing unsaved work.
+The presentation workspace is the application's primary work surface. Home and import controls should support this workflow without creating a separate Bible Study mode.
 
 Do not overcrowd the initial interface with advanced features.
 
@@ -493,7 +439,7 @@ Requirements:
 - Validate imported files.
 - Validate user inputs.
 - Apply appropriate database access controls.
-- Protect private study notes and personal information.
+- Protect local presentation projects and imported content.
 - Use secure communication for cloud services.
 - Provide reliable backup and restoration.
 - Handle application crashes gracefully.
@@ -518,29 +464,27 @@ The project will be developed in eight major phases.
 - Establish Git version control.
 - Create development documentation.
 
-## Phase 2 — Bible Engine
+## Phase 2 — Scripture Source Engine
 
-- Design Bible database.
+- Maintain the local Bible database for presentation sources.
 - Integrate initial Bible translation.
 - Implement books and chapters.
-- Implement verse navigation.
-- Implement Bible search.
-- Add translation switching.
-- Add translation comparison.
-- Add bookmarks.
-- Add highlights.
-- Add personal notes.
+- Implement fast reference and verse selection for slides.
 - Add import functionality.
 
 ## Phase 3 — Presentation Engine
 
-- Build presentation workspace.
+- Resolve Bible/Lyrics selection into Preview and the service sequence.
+- Reshape the operator workspace around the evolving, resizable four-area design in Section 2.1.
+- Build the project/show panel and save-before-discard workflow.
+- Build content feeds incrementally, agreeing their sub-items with the user as each is designed.
+- Build display controls and toolbar areas incrementally, agreeing their sub-items with the user as each is designed.
 - Create slide editor.
 - Implement Scripture slides.
 - Implement song slides.
 - Implement playlists.
-- Add preview and live output.
-- Add presentation controls.
+- Implement explicit Preview-to-Live and independent Live navigation.
+- Add presentation controls and next-slide preview.
 
 ## Phase 4 — Media Engine
 
@@ -605,9 +549,9 @@ These rules are mandatory throughout the project.
 
 ## 11.1 Preserve the agreed vision
 
-- Do not remove either main operating mode.
+- Keep BibleShow focused on church presentation; do not add a dedicated Bible Study workspace unless the user changes this direction.
 - Do not abandon the intelligent Scripture detection concept.
-- Do not create separate Bible engines for the two modes.
+- Keep one centralized Scripture source library for presentation content.
 - Do not introduce Lovable.
 - Do not migrate to another framework without a clear technical reason and approval.
 
@@ -677,7 +621,20 @@ This section must be updated as development progresses.
 - Production frontend build successfully tested.
 - Tauri project initialised.
 - Tauri desktop application successfully launched.
-- Default Vite starter interface displayed inside the Tauri window.
+- BibleShow shell with Home and Presentation entry points.
+- Local KJV and lyric library import and browsing.
+- Initial Preview/Live operator monitors and SQLite presentation persistence.
+
+## Current behavior and open design
+
+- The user confirmed the earlier Preview/Live template worked. The revised layout hides the app sidebar, breadcrumb/search header and redundant page title while Presentation is open; desktop visual review is pending.
+- Bible verse and lyric-section selection populate Preview. The current layout enlarges operator text, gives the feed its own scroll area, and adds project JSON import/export; verify these interactions in Tauri.
+- The former Live status strip now provides KJV reference/range and keyword search. Multi-verse passages are added as one verse per slide. Single-click stages Preview; double-click or Enter sends directly to Live. Song sections remain visible beside the song list.
+- The audience output is a separate fullscreen Tauri window. The operator selects a connected display, and Live slides and alerts are synchronized to that window. Verify display routing and reopening behavior in the desktop app.
+- KJV keyword search occupies its own results view to keep the passage controls usable; choosing a result clears the search results and returns to the verse browser. Unsaved show changes offer save, discard or stay when changing projects or leaving.
+- The four-area layout includes resizable project/show, Preview/Live, content-feed, and local display-control areas. Only Bible and Lyrics feeds are connected to local content; remaining feed categories are placeholders.
+- The Profile/Edit/View/Settings/Connections/Plugins toolbar headings are visible, but detailed sub-items remain open for user brainstorming. Add future suggestions here as they arrive.
+- The product plan and navigation no longer include a dedicated Bible Study workspace. Scripture lookup remains part of presentation preparation.
 
 ## Current technology versions recorded
 
@@ -694,26 +651,23 @@ These are the versions recorded during initial setup, not permanent requirements
 
 ## Not yet implemented
 
-- Actual BibleShow interface.
-- Bible Study workspace.
-- Presentation workspace.
-- Bible database.
-- Bible translations.
-- Song management.
-- Slide editor.
-- Media engine.
+- Expand Scripture selection and search for presentation use, subject to translation rights and scope.
+- Fully verified presentation selection, project workflow, slide editing, the evolving four-area operator layout, and separate audience output.
+- Media feeds and playback for video, images, URLs and live inputs.
+- Display controls and message alerts.
 - Scripture detection.
-- Supabase integration.
-- Cloud synchronisation.
-- Windows installer.
+- Optional Supabase integration and cloud synchronisation.
+- Windows installer and release validation.
 
 ## Immediate next development objectives
 
-1. Establish permanent documentation.
-2. Replace the default Vite starter interface with the BibleShow application shell.
-3. Create navigation for Bible Study and Church Presentation.
-4. Establish the visual design system.
-5. Begin implementation of the Bible Engine.
+1. Verify the full-window layout, larger typography, feed scrolling, resizers, project import/export, save-before-close, display controls and alerts in the desktop app.
+2. Verify Bible keyword result selection, the unsaved-show prompt, project management and fullscreen audience output in the Tauri desktop app.
+3. Continue remaining content-feed implementation with the user.
+4. Define remaining content-feed and toolbar sub-items with the user before implementing each.
+5. Verify local presentation save/load/delete at runtime.
+
+These objectives are ordered working guidance. New user suggestions may change their order or add new stages; update this guide and the feature register as the design evolves.
 
 ---
 
@@ -741,16 +695,15 @@ They must be researched and agreed when the relevant phase begins.
 
 BibleShow will be considered successful when it provides:
 
-1. A dependable personal Bible study environment.
-2. A professional church presentation environment.
-3. One shared and reliable Bible data engine.
-4. Excellent offline functionality.
-5. Smooth Scripture and song presentations.
-6. Intelligent Scripture detection with operator safeguards.
-7. Reliable multiple-display support.
-8. Secure optional cloud synchronisation.
-9. An intuitive interface.
-10. A maintainable, extensible architecture.
+1. A professional and reliable church presentation environment.
+2. Fast, accurate Scripture and lyric selection.
+3. Excellent offline functionality.
+4. Smooth Scripture, song and media presentations.
+5. Intelligent Scripture detection with operator safeguards.
+6. Reliable multiple-display support.
+7. Secure optional cloud synchronisation.
+8. An intuitive interface.
+9. A maintainable, extensible architecture.
 
 The ultimate objective is to build a dependable application that churches and individuals can use confidently, without being forced into expensive subscriptions for essential functionality.
 
@@ -758,7 +711,7 @@ The ultimate objective is to build a dependable application that churches and in
 
 # FINAL DEVELOPMENT DIRECTIVE
 
-**BibleShow is one integrated product with two equally important modes: Bible Study and Church Presentation.**
+**BibleShow is a focused church presentation application with Scripture, lyrics and media as first-class content sources.**
 
 Every architectural decision, feature, interface and development phase must support this vision.
 

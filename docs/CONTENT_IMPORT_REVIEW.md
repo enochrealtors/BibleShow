@@ -3,7 +3,7 @@
 **Reviewed:** 2 November 2026  
 **Source archive:** User-provided `Hymns & Bibles.zip`  
 **Source SHA-256:** `a4a1c59d96f8e0ae5ee5196089031cc2087d06765213830bddeacb1a71b82670`  
-**Status:** Cleaned local staging package prepared; application import support is not implemented.
+**Status:** Cleaned local staging package prepared; an initial local-only Tauri importer is implemented. Import from the BibleShow home screen is ready for user review.
 
 ## 1. User-selected content
 
@@ -52,4 +52,6 @@ The cleaned package and its review files are in the task outputs directory:
 - `BibleShow_Initial_Content_Report.md` — detailed processing and rights summary.
 - `BibleShow_Incomplete_Songs.csv` — 700 records requiring lyrics from a verified source.
 
-These assets have not been loaded into BibleShow because the application does not yet have a local content importer or Bible database. The staging ZIP is not committed to the source repository or uploaded to GitHub.
+The application importer loads the staging ZIP into a version-1 SQLite database under the operating system's BibleShow app-data folder. It sets KJV as the default translation and retains song authors, copyright, themes, section labels and source filenames. The importer validates the ZIP, caps archive, expanded and per-file sizes, and performs each import in a transaction. The KJV XML is 5.17 MB, so the per-file limit is 8 MB. The staging ZIP is not committed to the source repository or uploaded to GitHub.
+
+The import was initially blocked because its per-file cap was smaller than the KJV XML. The cap is now 8 MB, above the package's 5.17 MB KJV file size. The importer and database compile successfully, and the frontend production build succeeds. The native application has not yet been exercised end to end with the archive in this session. Content remains local to the user's device; do not bundle or publish the song ZIP until licensing and market requirements are resolved.

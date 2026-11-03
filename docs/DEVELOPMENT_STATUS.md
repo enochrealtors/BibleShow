@@ -2,7 +2,7 @@
 
 **Document version:** 1.0
 **Last updated:** 2 November 2026
-**Project status:** GitHub baseline established; initial shell implemented; first local content package prepared.
+**Project status:** GitHub baseline established; initial shell and local KJV/lyrics importer implemented; starter content package prepared.
 
 ## 1. Current Development Environment
 
@@ -49,6 +49,7 @@ Versions are historical records and should be checked before major upgrades.
 - Production frontend build completed successfully.
 - Replaced the Vite starter screen with the initial BibleShow application shell.
 - Added Home, Bible Study and Church Presentation navigation and landing states.
+- Per the user's updated product direction, removed the dedicated Bible Study workspace; KJV remains available as a presentation content source.
 - Added a working light/dark theme toggle and responsive desktop/mobile layouts.
 - Updated the document title and page metadata to BibleShow.
 - Production build passed after the shell implementation.
@@ -60,7 +61,35 @@ Versions are historical records and should be checked before major upgrades.
 - Prepared a local staging package with the KJV, 793 structured hymns, and 2,742 songs containing lyrics.
 - Repaired Windows-1252/UTF-8 encoding in 716 hymn files and split all 793 hymns into 3,849 OpenLyrics sections; lyric wording was checked as preserved.
 - Restored lyrics for 13 songs from unambiguous duplicates; listed 700 still-empty songs for manual/source-backed follow-up.
-- Added `docs/CONTENT_IMPORT_REVIEW.md`; content files remain outside Git and are not imported into the app yet.
+- Added `docs/CONTENT_IMPORT_REVIEW.md`; implemented the version-1 local SQLite schema and transactional importer for the prepared KJV and lyrics. The package remains outside Git.
+- Added a home-screen import control and local library summary; KJV is set as the default translation during import.
+- Added Bible book and chapter selection, previous/next chapter controls, and verse reading from local KJV SQLite data.
+- Fixed the import size limit after confirming that the KJV XML is 5.17 MB; the original 3 MB per-file cap rejected the Bible and rolled back the complete import.
+- Added searchable local hymn/song browsing with category filters and formatted lyric details.
+- User confirmed that the Bible and lyrics imported successfully. Follow-up added a verse selector, KJV access from Presentation, and one-section-per-page lyric previews with page navigation.
+- Implemented the first presentation operator workspace: Bible and lyric source panels, separate Preview and Live monitor panels, explicit Take Live, independent live/preview navigation, and an in-memory service sequence with slide thumbnails.
+- The Live monitor is an operator preview. Audience output uses a separate fullscreen Tauri window with display selection.
+- Added local SQLite presentation persistence with schema version 2. Saved sequences retain references to installed KJV verses and lyric sections and hydrate their text on load.
+- Added presentation name, save/update, saved-presentation selection, New, and Delete controls. Loading a saved sequence stages its first page in Preview and leaves Live untouched.
+- Added page duplication and up/down ordering controls to the service sequence; sequence edits keep Preview and Live references aligned.
+- Validation: ESLint, TypeScript checks for both frontend projects, Vite production build, `cargo check`, and `git diff --check` passed. Build artifacts were written under `/tmp` because the project checkout is read-only in this environment. Desktop save/load/delete behavior and the installed-library migration still need runtime verification.
+- Fixed the reported source-selection gap in the interface: clicking a Bible verse or lyric section now stages it in Preview, with selected-item feedback; the source tab is labeled Lyrics. Frontend checks pass; verify this in the Tauri desktop app when available.
+- Updated the presentation design direction: resizable left project/show panel, centre upper Preview/Live area, centre lower content feed, right display controls, and a top toolbar. Content-feed and toolbar sub-items are to be brainstormed with the user as each area is designed; this is a working plan that can evolve.
+- Implemented the first four-area layout pass: draggable desktop dividers, a left project/current-show panel, centre Preview/Live monitors over content feeds, and right-side local Live monitor controls with clear/open, static and scrolling alerts.
+- Added feed tabs for Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Media, Themes, Functions and Overlays. Bible and Lyrics are connected; remaining feeds are clearly marked as planned placeholders.
+- Added top toolbar headings for Profile, Edit, View, Settings, Connections and Plugins. Their sub-items remain placeholders pending further design.
+- Added drag-and-drop from Bible verses and lyric sections into the current show, plus a save-before-close prompt from the workspace Home control. Native desktop visual and interaction review remains pending.
+- Reclaimed the Presentation screen by hiding the global sidebar and breadcrumb/search header while Presentation is open, removing its redundant page title block, and expanding the operator UI to use the full window.
+- Removed Bible Study navigation and the reading workspace. Home and Presentation remain; KJV import and Scripture selection remain available for presentation use.
+- Increased operator, project and feed typography and tightened nested feed sizing to address the verse/lyric list scrolling issue.
+- Added project JSON import and export for reusable or transferable service projects.
+- Replaced the Live status strip with a KJV Bible search bar supporting reference/range lookup and keyword search.
+- Added passage range staging; each selected verse becomes its own slide so text remains at normal size.
+- Reworked the Lyrics feed to show song sections beside the song list instead of hiding them below it.
+- Single-click on a source/sequence item stages Preview; double-click or Enter sends that item directly to Live.
+- Added a separate hidden-at-startup audience output window, connected-display selection, fullscreen monitor placement, and event-based mirroring of Live slides and alerts.
+- Changed KJV keyword search into a dedicated results view so search results no longer crowd book/chapter and passage controls; selecting a result returns to the verse browser and clears the result panel.
+- Added a three-choice unsaved-show prompt (Save and continue, Discard changes, Stay here) for leaving Presentation, starting a new show, or opening another project.
 
 ### Desktop foundation
 - Tauri 2 initialised.
@@ -82,11 +111,11 @@ The supporting project documents are present. Their contents remain planning ref
 
 ## 4. Current Application State
 
-The Vite starter screen has been replaced by a first-pass BibleShow shell. Home, Bible Study and Church Presentation are navigable, and the theme toggle switches between light and dark palettes. The study and presentation pages are structural landing states only; their engines and workflows are not implemented. A narrow browser preview was reviewed; the responsive navigation, page switching and theme toggle were checked. Review inside the Tauri desktop window remains pending.
+The Vite starter screen has been replaced by a presentation-focused BibleShow shell. Home provides content import and library status; Presentation is the primary workspace. The KJV and lyrics are presentation sources. The presentation workspace now includes reference/keyword search, passage staging, visible song sections, project import/export, local persistence, and a fullscreen audience window with display selection. Desktop runtime review is still needed.
 
-The user-selected KJV and cleaned lyrics are prepared in a local staging package, but the application has no content importer or Bible database yet. No Bible content is currently loaded in the app.
+The user-selected KJV and cleaned lyrics are prepared in a local staging package. A home-screen importer writes them to BibleShow's local SQLite database; the Presentation feed reads KJV verses and lyric sections from that database. No content is loaded until the user selects the package in the desktop app.
 
-No presentation, song, media or Scripture detection functionality has been implemented.
+Media projection and Scripture detection have not been implemented.
 
 ## 5. Known Configuration Items
 
@@ -108,25 +137,27 @@ Do not change working configuration unnecessarily.
 - [x] Implement main navigation.
 - [x] Establish initial light and dark themes.
 
-### Bible Engine
-- [ ] Design SQLite database.
-- [~] Draft initial SQLite schema; choose driver/migration framework and implement migrations.
+### Scripture Source Engine
+- [x] Implement versioned SQLite schema and local importer; future migrations remain.
 - [~] Identify Bible translation rights; KJV source selected, territory review remains open.
-- [ ] Import initial Bible translation.
-- [ ] Implement Bible book navigation.
-- [ ] Implement chapter and verse navigation.
-- [ ] Implement Bible search.
-- [ ] Implement translation switching.
-- [ ] Implement comparison.
-- [ ] Implement bookmarks, highlights and notes.
+- [x] Import initial Bible translation from the local package.
+- [x] Browse books, chapters and verses from the Presentation feed.
+- [x] Search KJV references, passage ranges and verse keywords for presentation.
+- [ ] Add licensed translation management.
 
 ### Presentation Engine
-- [ ] Create presentation workspace.
+- [~] Create presentation operator workspace with distinct Preview and Live screens.
+- [~] Use the full application window for Presentation and remove redundant page/header/sidebar chrome.
+- [x] Remove the dedicated Bible Study workspace from the application and roadmap; retain KJV lookup in the presentation feed.
+- [~] Increase operator typography and improve nested feed scrolling (desktop verification pending).
+- [~] Import and export local presentation project JSON files.
 - [ ] Implement Scripture slides.
 - [ ] Implement song management.
 - [ ] Implement slide editor.
-- [ ] Implement playlists and service order.
-- [ ] Implement preview and live output.
+- [~] Add individual Bible/lyric pages and multi-verse passage ranges to the service sequence.
+- [~] Implement in-workspace Preview-to-Live controls.
+- [~] Save and load presentations and service order (implementation complete; runtime verification pending).
+- [~] Implement separate fullscreen audience output window and display selection (code complete; desktop verification pending).
 
 ### Media Engine
 - [ ] Image management.
@@ -168,11 +199,10 @@ Do not change working configuration unnecessarily.
 
 The next development sequence is:
 
-1. Implement a local content importer and versioned SQLite migrations that keep Bible and song data outside Git.
-2. Load the user-selected KJV from the prepared package as the default translation; add Bible book/chapter/verse navigation.
-3. Add the complete hymns/songs from the package to a local library, retaining credits and copyright metadata.
-4. Review KJV/song rights for target release markets before bundling content in a public build; review the 700 incomplete songs when verified lyric sources become available.
-5. Review the shell inside the Tauri desktop window when a native window is available.
+1. Verify keyword results-only browsing, passage staging, the unsaved-show prompt, and project import/export in the Tauri app.
+2. Exercise local project save/load/delete and fullscreen audience output reopening on available displays in the Tauri app.
+3. Continue project management and the remaining content feeds, agreeing their sub-items with the user as each area is implemented.
+5. Review KJV/song rights for target release markets before bundling content in a public build; review the 700 incomplete songs when verified lyric sources become available.
 
 Do not jump ahead to advanced AI or cloud functionality.
 
@@ -189,4 +219,4 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Build the local importer for the prepared KJV and lyric package, keeping content outside Git and preserving source/rights metadata.
+**Current restart point:** Review the updated Bible keyword results view and three-choice unsaved-show prompt in Tauri. Verify passage staging, project import/export, save/load/delete, and fullscreen audience output routing. Then continue project management and the remaining content feeds.

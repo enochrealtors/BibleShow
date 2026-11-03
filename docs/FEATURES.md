@@ -19,9 +19,8 @@ No feature should be marked implemented until it has been tested.
 - [ ] BibleShow branding and logo.
 - [ ] Main application shell.
 - [ ] Main navigation.
-- [ ] Bible Study workspace.
 - [ ] Church Presentation workspace.
-- [ ] Workspace switching.
+- [ ] Home-to-Presentation navigation.
 - [ ] Light theme.
 - [ ] Dark theme.
 - [ ] User preferences.
@@ -29,16 +28,14 @@ No feature should be marked implemented until it has been tested.
 - [ ] Settings.
 - [ ] Application update mechanism.
 
-# 2. BIBLE ENGINE
+# 2. PRESENTATION CONTENT SOURCES
 
-## Bible navigation
-- [ ] Bible book selection.
-- [ ] Old Testament navigation.
-- [ ] New Testament navigation.
-- [ ] Chapter navigation.
-- [ ] Verse navigation.
-- [ ] Previous and next chapter.
-- [ ] Bible reference input.
+## Scripture source library
+- [x] Bible book selection for KJV.
+- [x] Old Testament and New Testament navigation through the book selector.
+- [x] Chapter and verse navigation in the presentation feed.
+- [~] Select a verse to stage it in Preview.
+- [ ] Search and insert Bible references for presentation.
 
 ## Bible translations
 - [ ] Multiple translation support.
@@ -46,78 +43,64 @@ No feature should be marked implemented until it has been tested.
 - [ ] Translation import.
 - [ ] Translation management.
 - [ ] Translation attribution and licence information.
-- [ ] Translation comparison.
 
-## Bible search
-- [ ] Exact phrase search.
-- [ ] Keyword search.
-- [ ] Partial word search.
-- [ ] Bible reference search.
-- [ ] Search within a selected translation.
-- [ ] Search across translations.
-- [ ] Search results navigation.
-- [ ] Topic search.
-- [ ] Semantic search.
+# 3. SONGS AND LYRICS
 
-# 3. BIBLE STUDY MODE
-
-- [ ] Reading interface.
-- [ ] Verse highlighting.
-- [ ] Multiple highlight colours.
-- [ ] Bookmarks.
-- [ ] Bookmark collections.
-- [ ] Personal study notes.
-- [ ] Reading history.
-- [ ] Reading plans.
-- [ ] Reading progress.
-- [ ] Cross-references.
-- [ ] Parallel Bible view.
-- [ ] Chapter context.
-- [ ] Scripture collections.
-- [ ] Export personal notes.
-- [ ] Backup and restore study data.
-- [ ] Future Bible dictionary integration.
-- [ ] Future commentary integration.
-- [ ] Future concordance integration.
+- [x] Browse the local hymn and song library.
+- [x] Search titles and author names.
+- [ ] Create songs.
+- [ ] Edit songs.
+- [x] Display verse, chorus and bridge sections.
+- [~] Preview each song section on its own presentation page.
+- [ ] Song categorisation.
+- [ ] Song import.
+- [ ] Song playlists.
 
 # 4. CHURCH PRESENTATION MODE
 
 ## Presentation workspace
-- [ ] Presentation operator interface.
+- [~] Presentation operator interface with distinct Preview and Live screens.
+- [~] Full-window presentation mode, hiding the global sidebar and redundant page/header chrome.
+- [~] Resizable four-area operator layout with larger text and dedicated content-feed scrolling (desktop review pending).
+- [~] Left panel for saved projects and current-show items, including drag/drop from Bible/Lyrics feeds, JSON import/export, and save-before-close prompt.
+- [~] Content-feed tabs for Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Media, Themes, Functions, and Overlays; only Bible and Lyrics are wired to local content so far.
+- [x] KJV reference/range and keyword search in the presentation workspace.
+- [x] Multi-verse passages are staged as one readable verse per slide.
+- [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.
+- [x] Lyrics feed shows song sections alongside the song list.
+- [x] Keyword search results use a dedicated view and clear when a verse is selected.
+- [x] Unsaved project changes prompt to save, discard, or stay before leaving, starting a new show, or opening another project.
+- [~] Right-panel controls for clearing Preview/Live content, closing the local Live monitor, and static/scrolling alerts in that monitor.
+- [~] Top toolbar headings for Profile, Edit, View, Settings, Connections, and Plugins; sub-items are placeholders for later design with the user.
 - [ ] Slide editor.
 - [ ] Slide thumbnails.
-- [ ] Slide preview.
-- [ ] Live presentation output.
+- [~] Preview selection that does not change Live output until explicitly sent.
+- [~] Separate fullscreen Live audience-output window with connected-display selection (desktop verification pending).
 - [ ] Next-slide preview.
-- [ ] Previous and next controls.
-- [ ] Slide duplication.
+- [~] Independent Preview and Live previous/next controls for the temporary sequence.
+- [~] Save, update, load and delete local presentations in SQLite.
+- [~] Import/export presentation project JSON.
+- [~] Slide duplication in the service sequence.
 - [ ] Slide deletion.
-- [ ] Slide reordering.
-- [ ] Presentation saving.
-- [ ] Presentation loading.
+- [~] Move pages earlier or later in the service sequence.
+- [~] Presentation saving.
+- [~] Presentation loading.
+
+The operator layout and toolbar categories are evolving design direction. Add future suggestions to PROJECT_GUIDE.md and agree on each area’s sub-items before implementation.
 
 ## Scripture slides
+- [~] Browse and select KJV Scripture from Presentation.
+- [~] Selecting a Bible verse or lyric section stages it directly in Preview; selected source is visibly marked. Desktop runtime verification is pending.
+- [~] Preview a selected individual verse as a presentation page.
 - [ ] Insert Bible references.
-- [ ] Insert individual verses.
 - [ ] Insert multiple verses.
 - [ ] Select Bible translation.
 - [ ] Scripture slide formatting.
 - [ ] Scripture backgrounds.
 - [ ] Automatic verse layout.
-- [ ] Send study passage to presentation.
+- [ ] Send selected Scripture passage to the service sequence.
 
-## Songs and lyrics
-- [ ] Song library.
-- [ ] Song search.
-- [ ] Create songs.
-- [ ] Edit songs.
-- [ ] Verse sections.
-- [ ] Chorus sections.
-- [ ] Bridge sections.
-- [ ] Song presentation.
-- [ ] Song categorisation.
-- [ ] Song import.
-- [ ] Song playlists.
+The requested four-area layout, project/show workflow, content feed categories, display controls, and toolbar areas are design direction. They are not implemented features; see the evolving layout agreement in PROJECT_GUIDE.md.
 
 ## Playlists and service management
 - [ ] Create playlists.

@@ -58,15 +58,15 @@ Reasons:
 ## 5. Local Database
 
 **Decision:** SQLite  
-**Status:** AGREED — IMPLEMENTATION PENDING
+**Status:** AGREED — INITIAL LOCAL LIBRARY AND PRESENTATION SCHEMA IMPLEMENTED
 
 Reasons:
 - Local storage.
 - Offline operation.
 - No separate database server required.
-- Suitable for personal notes, Bible data, songs and presentations.
+- Suitable for Scripture and lyric libraries, presentation projects and local media metadata.
 
-The database architecture must support future migrations and synchronisation.
+The current local schema stores the KJV, lyrics, and presentation references. Schema versions 1 and 2 are applied transactionally. Backup and synchronisation remain future work.
 
 ## 6. Cloud Backend
 
@@ -156,14 +156,12 @@ Avoid unnecessary coupling and duplicated functionality.
 
 ## 12. Bible Data Architecture
 
-**Decision:** One shared Bible Engine  
+**Decision:** One local Scripture source library for presentation
 **Status:** AGREED
 
-Bible Study Mode and Church Presentation Mode must use the same Bible data source.
+The KJV and any later licensed translations are content sources for the presentation workspace. BibleShow is not planned as a general-purpose Bible study application.
 
-Do not create separate Bible databases for the two modes.
-
-Personal notes, bookmarks and highlights must remain distinct from presentation content.
+Presentation slides should store references to Scripture, not duplicate verse text.
 
 ## 13. Offline-First Strategy
 
@@ -171,10 +169,8 @@ Personal notes, bookmarks and highlights must remain distinct from presentation 
 **Status:** AGREED
 
 Offline functionality should include:
-- Bible reading.
-- Bible navigation.
+- Local Bible reference and verse selection for presentation.
 - Locally available translations.
-- Notes and bookmarks.
 - Songs.
 - Presentations.
 - Local media.
