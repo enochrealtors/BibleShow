@@ -84,6 +84,7 @@ No feature should be marked implemented until it has been tested.
 - [ ] Slide thumbnails.
 - [~] Preview selection that does not change Live output until explicitly sent.
 - [~] Separate fullscreen Live audience-output window with connected-display selection (desktop verification pending).
+- [~] Ubuntu 24.04 x64 trial `.deb` packaging workflow, including GStreamer runtime dependencies; workflow artifact still needs to be built and installed on the user's laptop.
 - [ ] Next-slide preview.
 - [~] Independent Preview and Live previous/next controls for the temporary sequence.
 - [~] Save, update, load and delete local presentations in SQLite.

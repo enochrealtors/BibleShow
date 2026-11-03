@@ -221,7 +221,7 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Direct camera/webcam capture, camera device selection, an operator-to-audience WebRTC relay, direct HTTP(S) video/MJPEG sources and the existing experimental RTSP option are implemented. Run the desktop app on a machine with a camera and compatible direct endpoints; runtime behavior, especially WebView playback support, remains unverified. Then move to the requested multi-format Bible and Lyrics imports.
+**Current restart point:** Build the Ubuntu 24.04 x64 `.deb` trial through the new GitHub Actions workflow, then verify installation against the user's Ubuntu release and review the desktop. This trial path was chosen over Windows because Windows GStreamer packaging is unresolved. The app already has camera/webcam capture, camera relay to audience output, direct HTTP(S) video/MJPEG, YouTube embedded playback, and experimental RTSP; desktop playback remains unverified. Then move to the requested multi-format Bible and Lyrics imports.
 
 ### 9. Current session — RTSP Live Feed
 
@@ -240,3 +240,11 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - Moved Tauri window creation into Rust so the main webview can allow camera permission requests after the operator starts capture, while the audience webview denies camera permission. Permission behavior and playback still require desktop review.
 - Kept the existing GStreamer RTSP receiver as an optional experimental choice. Updated the Live Feed design document to reflect actual code and platform verification limits.
 - Validation: production frontend build, app and node TypeScript checks, ESLint, Rust `cargo check`, Tauri config JSON parsing, and `git diff --check` passed. The build used `/tmp` for output because dependency cache folders are read-only in this session. YouTube link parsing/embed behavior and real camera/network playback still need desktop runtime verification.
+
+### 11. Current session — Ubuntu trial package
+
+- The user redirected the trial build from Windows to Ubuntu to avoid unresolved Windows GStreamer packaging.
+- Added an Ubuntu 24.04 x64 GitHub Actions build that produces a Debian `.deb` package and uploads it as a short-retention workflow artifact.
+- The `.deb` declares GStreamer good plugins and libav runtime dependencies so apt can install the RTSP plugins required by the current Linux backend. The build job installs GTK/WebKit, Rust, frontend and GStreamer development dependencies.
+- The connected build machine is Ubuntu 26.04 x64. Building on Ubuntu 24.04 avoids producing a binary that requires newer glibc than an Ubuntu 24.04 laptop. Actual installation on the user's laptop still needs confirmation against its Ubuntu release.
+- The Windows build path was not completed; no Windows-only changes are retained.
