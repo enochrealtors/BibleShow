@@ -38,6 +38,8 @@ Do not attempt to implement every advanced feature before the foundation is stab
 
 Every major feature must be designed, implemented, tested and documented before moving forward.
 
+Record new product suggestions and user-reported issues in `docs/PROJECT_SUGGESTIONS.md`. Append entries instead of replacing prior ones, assign each a roadmap stage and status, and synchronize agreed work into `docs/FEATURES.md` and this guide when relevant.
+
 ---
 
 # 2. CHURCH PRESENTATION WORKSPACE

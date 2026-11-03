@@ -1,4 +1,5 @@
 mod live_feed;
+mod media_stream;
 mod resource_import;
 
 use roxmltree::{Document, Node};
@@ -229,6 +230,7 @@ struct SavedPresentationSlide {
     section_index: Option<i64>,
     media_id: Option<String>,
     media_path: Option<String>,
+    media_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -240,6 +242,7 @@ struct MediaFileSummary {
     mime_type: String,
     local_path: String,
     file_size: u64,
+    playback_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -636,7 +639,7 @@ fn import_lyrics_resources(app: tauri::AppHandle, request: Request<'_>) -> Resul
 }
 
 #[tauri::command(async)]
-fn import_media_file(app: tauri::AppHandle, request: Request<'_>) -> Result<MediaFileSummary, String> {
+fn import_media_file(app: tauri::AppHandle, media_stream: tauri::State<'_, media_stream::MediaStreamState>, request: Request<'_>) -> Result<MediaFileSummary, String> {
     let packet = match request.body() {
         InvokeBody::Raw(bytes) => bytes.as_slice(),
         InvokeBody::Json(_) => return Err("Choose the media again; its binary data was not received.".into()),
@@ -694,7 +697,10 @@ fn import_media_file(app: tauri::AppHandle, request: Request<'_>) -> Result<Medi
     } else {
         db.execute("INSERT OR IGNORE INTO video_files(id,filename,mime_type,local_path,file_size,created_at) VALUES (?1,?2,?3,?4,?5,datetime('now'))", params![digest,filename,mime_type,local_path_string,bytes.len() as i64]).map_err(db_error)?;
     }
-    Ok(MediaFileSummary { id: digest, filename, media_type: media_type.into(), mime_type: mime_type.into(), local_path: local_path_string, file_size: bytes.len() as u64 })
+    let playback_url = if media_type == "video" {
+        Some(media_stream.url_for(&digest, local_path.clone(), mime_type)?)
+    } else { None };
+    Ok(MediaFileSummary { id: digest, filename, media_type: media_type.into(), mime_type: mime_type.into(), local_path: local_path_string, file_size: bytes.len() as u64, playback_url })
 }
 
 fn detect_media_type(bytes: &[u8]) -> Option<(&'static str, &'static str, &'static str)> {
@@ -708,11 +714,17 @@ fn detect_media_type(bytes: &[u8]) -> Option<(&'static str, &'static str, &'stat
 }
 
 #[tauri::command]
-fn get_media_files(app: tauri::AppHandle) -> Result<Vec<MediaFileSummary>, String> {
+fn get_media_files(app: tauri::AppHandle, media_stream: tauri::State<'_, media_stream::MediaStreamState>) -> Result<Vec<MediaFileSummary>, String> {
     if !database_path(&app)?.exists() { return Ok(Vec::new()); }
     let db = open_library(&app)?;
     let mut query = db.prepare("SELECT id,filename,media_type,mime_type,local_path,file_size FROM media_files UNION ALL SELECT id,filename,'video',mime_type,local_path,file_size FROM video_files ORDER BY filename COLLATE NOCASE").map_err(db_error)?;
-    query.query_map([], |row| Ok(MediaFileSummary { id: row.get(0)?, filename: row.get(1)?, media_type: row.get(2)?, mime_type: row.get(3)?, local_path: row.get(4)?, file_size: row.get::<_,i64>(5)? as u64 })).map_err(db_error)?.collect::<Result<Vec<_>,_>>().map_err(db_error)
+    let mut files = query.query_map([], |row| Ok(MediaFileSummary { id: row.get(0)?, filename: row.get(1)?, media_type: row.get(2)?, mime_type: row.get(3)?, local_path: row.get(4)?, file_size: row.get::<_,i64>(5)? as u64, playback_url: None })).map_err(db_error)?.collect::<Result<Vec<_>,_>>().map_err(db_error)?;
+    for file in &mut files {
+        if file.media_type == "video" {
+            file.playback_url = media_stream.url_for(&file.id, PathBuf::from(&file.local_path), &file.mime_type).ok();
+        }
+    }
+    Ok(files)
 }
 
 #[tauri::command]
@@ -933,7 +945,7 @@ fn validate_presentation_slide(tx: &Transaction<'_>, slide: &PresentationSlideIn
 }
 
 #[tauri::command]
-fn load_presentation(app: tauri::AppHandle, presentation_id: i64) -> Result<SavedPresentation, String> {
+fn load_presentation(app: tauri::AppHandle, media_stream: tauri::State<'_, media_stream::MediaStreamState>, presentation_id: i64) -> Result<SavedPresentation, String> {
     let db = open_library(&app)?;
     let title: String = db.query_row("SELECT title FROM presentations WHERE id=?1", [presentation_id], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| "That saved presentation could not be found.".to_string())?;
     let mut query = db.prepare("SELECT content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text FROM presentation_items WHERE presentation_id=?1 ORDER BY position").map_err(db_error)?;
@@ -942,23 +954,26 @@ fn load_presentation(app: tauri::AppHandle, presentation_id: i64) -> Result<Save
     }).map_err(db_error)?.collect::<Result<Vec<_>,_>>().map_err(db_error)?;
     let mut slides = Vec::with_capacity(records.len());
     for (kind, source_id, translation_id, book_number, chapter_number, verse_number, song_id, section_index, media_id, saved_title, subtitle, reference) in records {
-        let (body, media_path) = if kind == "scripture" {
+        let (body, media_path, media_url) = if kind == "scripture" {
             let (translation, book, chapter, verse) = (translation_id.as_deref().unwrap_or("KJV"),book_number.ok_or("A saved Scripture page is missing its book.")?,chapter_number.ok_or("A saved Scripture page is missing its chapter.")?,verse_number.ok_or("A saved Scripture page is missing its verse.")?);
-            (db.query_row("SELECT text FROM bible_verses WHERE translation_id=?1 AND book_number=?2 AND chapter_number=?3 AND verse_number=?4", params![translation,book,chapter,verse], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The verse for {saved_title} is no longer installed."))?, None)
+            (db.query_row("SELECT text FROM bible_verses WHERE translation_id=?1 AND book_number=?2 AND chapter_number=?3 AND verse_number=?4", params![translation,book,chapter,verse], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The verse for {saved_title} is no longer installed."))?, None, None)
         } else if kind == "lyrics" {
             let song = song_id.as_deref().ok_or("A saved lyric page is missing its song.")?;
             let section = section_index.ok_or("A saved lyric page is missing its section.")?;
-            (db.query_row("SELECT lyrics FROM song_sections WHERE song_id=?1 AND position=?2", params![song,section], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The lyrics for {saved_title} are no longer installed."))?, None)
+            (db.query_row("SELECT lyrics FROM song_sections WHERE song_id=?1 AND position=?2", params![song,section], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The lyrics for {saved_title} are no longer installed."))?, None, None)
         } else {
             let media = media_id.as_deref().ok_or("A saved image page is missing its media reference.")?;
-            let path = if kind == "video" {
-                db.query_row("SELECT local_path FROM video_files WHERE id=?1", [media], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The video for {saved_title} is no longer installed."))?
+            let (path, url) = if kind == "video" {
+                let (path, mime_type): (String, String) = db.query_row("SELECT local_path,mime_type FROM video_files WHERE id=?1", [media], |row| Ok((row.get(0)?,row.get(1)?))).optional().map_err(db_error)?.ok_or_else(|| format!("The video for {saved_title} is no longer installed."))?;
+                let url = media_stream.url_for(media, PathBuf::from(&path), &mime_type).ok();
+                (path, url)
             } else {
-                db.query_row("SELECT local_path FROM media_files WHERE id=?1 AND media_type='image'", [media], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The image for {saved_title} is no longer installed."))?
+                let path = db.query_row("SELECT local_path FROM media_files WHERE id=?1 AND media_type='image'", [media], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The image for {saved_title} is no longer installed."))?;
+                (path, None)
             };
-            (String::new(), Some(path))
+            (String::new(), Some(path), url)
         };
-        slides.push(SavedPresentationSlide { source_id,title:saved_title,subtitle,reference,kind,body,book_number,chapter_number,verse_number,translation_id,song_id,section_index,media_id,media_path });
+        slides.push(SavedPresentationSlide { source_id,title:saved_title,subtitle,reference,kind,body,book_number,chapter_number,verse_number,translation_id,song_id,section_index,media_id,media_path,media_url });
     }
     Ok(SavedPresentation { id:presentation_id,title,slides })
 }
@@ -1321,6 +1336,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(live_feed::LiveFeedState::default());
+            app.manage(media_stream::MediaStreamState::start().map_err(std::io::Error::other)?);
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("BibleShow")
                 .inner_size(800.0, 600.0)

@@ -231,7 +231,7 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Build the Ubuntu 24.04 x64 `.deb` trial through the new GitHub Actions workflow, then verify installation against the user's Ubuntu release and review the desktop. This trial path was chosen over Windows because Windows GStreamer packaging is unresolved. The app already has camera/webcam capture, camera relay to audience output, direct HTTP(S) video/MJPEG, YouTube embedded playback, and experimental RTSP; desktop playback remains unverified. Then move to the requested multi-format Bible and Lyrics imports.
+**Current restart point:** The user has deferred desktop packaging and will review the app with `cargo tauri dev`. Prioritize their reported media playback problem, then continue the documented media/resource roadmap. The user is also considering a Windows development checkout; see suggestion S-003 in `docs/PROJECT_SUGGESTIONS.md`.
 
 ### 9. Current session — RTSP Live Feed
 
@@ -258,3 +258,11 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - The `.deb` declares GStreamer good plugins and libav runtime dependencies so apt can install the RTSP plugins required by the current Linux backend. The build job installs GTK/WebKit, Rust, frontend and GStreamer development dependencies.
 - The connected build machine is Ubuntu 26.04 x64. Building on Ubuntu 24.04 avoids producing a binary that requires newer glibc than an Ubuntu 24.04 laptop. Actual installation on the user's laptop still needs confirmation against its Ubuntu release.
 - The Windows build path was not completed; no Windows-only changes are retained.
+
+### 12. Current session — local video playback and suggestion tracking
+
+- Investigated the report that imported videos were accepted but would not play. The likely Linux-specific cause is WebKitGTK playback through Tauri's asset URL; see the upstream [Tauri Linux playback issue](https://github.com/tauri-apps/tauri/issues/15472) and related [asset protocol issue](https://github.com/tauri-apps/tauri/issues/3725).
+- Added a local-only, token-protected HTTP video endpoint that serves imported MP4/WebM files with `HEAD`, byte-range responses and seek support. The media-feed thumbnail, operator output and audience output now use its playback URL. This is implemented but awaits runtime review in the user's Ubuntu desktop app; WebView codec support still applies.
+- Added `docs/PROJECT_SUGGESTIONS.md` as the append-only suggestion and feedback log, linked from `PROJECT_GUIDE.md` and `docs/FEATURES.md`.
+- Recorded the Windows laptop workflow as a planned project item. A separate Windows checkout can use the same GitHub repository; cross-platform development and Windows dependencies still need validation.
+- Current local branch at inspection: `main`, six commits ahead of `origin/main`; these code and documentation changes remain uncommitted and have not been pushed.

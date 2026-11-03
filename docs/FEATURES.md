@@ -3,6 +3,8 @@
 **Document version:** 1.0
 **Last updated:** 3 November 2026
 
+New product suggestions and feedback must be appended to [`docs/PROJECT_SUGGESTIONS.md`](PROJECT_SUGGESTIONS.md). When a suggestion is agreed and enters the roadmap, update the relevant feature here and the project guide/status as needed; keep the suggestion entry and its disposition for traceability.
+
 ## STATUS KEY
 
 - [ ] Planned
@@ -72,7 +74,7 @@ No feature should be marked implemented until it has been tested.
 - [x] Multi-verse passages are staged as one readable verse per slide.
 - [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.
 - [x] Lyrics feed shows song sections alongside the song list.
-- [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into the local library, stages them as presentation slides, and supports muted looping playback in Preview and audience output. Uploads avoid a second full-file buffer and use temporary-file installation; confirm behavior in the desktop app.
+- [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into the local library, stages them as presentation slides, and supports muted looping playback in Preview and audience output. Linux playback now uses a token-protected loopback HTTP route with byte-range support to work around WebKitGTK asset URL playback failures; confirm behavior in the desktop app.
 - [~] Import Bible resources in USFM/USX, OSIS and Zefania XML formats; desktop review remains.
 - [~] Import lyrics in OpenLyrics/OpenSong/OpenLP XML, TXT and CSV formats; desktop review remains.
 - [~] Presentations feed browses saved local projects and their slides, with controls to Preview, send Live, add one slide, or add the full presentation to the current show.
@@ -242,6 +244,7 @@ The requested four-area layout, project/show workflow, content feed categories, 
 
 # 11. PACKAGING AND RELEASE
 
+- [~] Windows development checkout using the existing GitHub repository; local setup and platform-specific compatibility still need verification.
 - [ ] Windows installer.
 - [ ] Windows application testing.
 - [ ] Linux application build.

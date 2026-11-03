@@ -13,7 +13,7 @@ The local media library supports PNG, JPEG, GIF and WebP images, plus MP4 and We
 
 ## Playback
 
-Local video playback uses the active desktop WebView's media decoder. BibleShow does not transcode media on import. A load/decode error in the Preview or audience view is separate from an upload/storage failure; check whether the file is in the media feed first. Playback is muted, inline and looping in the initial implementation.
+Local video playback uses the active desktop WebView's media decoder. On Linux, Tauri's asset URL can fail in WebKitGTK even when the file is valid; BibleShow therefore serves imported MP4/WebM files from a token-protected loopback HTTP endpoint with byte-range and HEAD support. The same URL is used by the feed preview, operator Preview/Live, and audience window. The endpoint is bound only to `127.0.0.1`, serves only media IDs registered from the local library, and does not expose credentials. BibleShow does not transcode media on import. Playback remains dependent on the WebView's supported codecs and is muted, inline and looping in the initial implementation.
 
 ## Desktop review checklist
 
@@ -21,4 +21,5 @@ Local video playback uses the active desktop WebView's media decoder. BibleShow 
 2. Select each once for Preview, add it to the show, send it Live, and save/reopen a project containing each.
 3. Confirm the audience output plays the same saved local file.
 4. Try a larger file and verify the per-file status stays responsive; check that a failed selection reports an upload error while previously imported files remain listed.
-5. If an import succeeds but playback shows a codec error, record the container and codec before changing the decoder or adding format conversion.
+5. Confirm a video can play from the media-feed thumbnail, operator Preview, audience output, and after loading a saved presentation. Seek within a longer file to verify byte-range handling.
+6. If an import succeeds but playback still shows a decode error through the loopback URL, record the container and codec before changing the decoder or adding format conversion.
