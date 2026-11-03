@@ -1,8 +1,8 @@
 # BIBLESHOW — DATABASE DESIGN
 
-**Document version:** 1.0
-**Last updated:** 2 November 2026
-**Status:** Initial local KJV/song schema implemented; SQLite schema version 2 adds saved presentations.
+**Document version:** 1.1
+**Last updated:** 3 November 2026
+**Status:** Local KJV/song schema, saved presentations, image library, and video library implemented; SQLite schema version 5.
 
 ---
 
@@ -167,7 +167,7 @@ Presentation content must reference Bible passages where appropriate rather than
 
 Stores metadata about imported media.
 
-The first implementation stores local image assets under BibleShow's application data directory. The SQLite record keeps the content hash, display filename, MIME type, size and local path. Supported initial image formats are PNG, JPEG, GIF and WebP.
+Local image and video assets are stored under BibleShow's application data directory. Image metadata is held in `media_files`; video metadata is held in `video_files`. Both records use a content hash, display filename, MIME type, size and local path. Supported formats are PNG, JPEG, GIF and WebP images, plus MP4 and WebM videos. Presentation items reference either media table by ID according to their content type.
 
 Proposed fields:
 - id

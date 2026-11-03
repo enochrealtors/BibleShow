@@ -88,6 +88,7 @@ This workspace is designed for church services, worship sessions, Bible teaching
 - Organise media into collections.
 - Support PowerPoint and PDF imports where technically feasible.
 - Support offline media playback.
+- Import local PNG, JPEG, GIF and WebP images and MP4/WebM videos for presentation; initial video output is muted and loops.
 
 ### Display and operator controls
 - Main presentation display.
@@ -632,8 +633,9 @@ This section must be updated as development progresses.
 - The former Live status strip now provides KJV reference/range and keyword search. Multi-verse passages are added as one verse per slide. Single-click stages Preview; double-click or Enter sends directly to Live. Song sections remain visible beside the song list.
 - The audience output is a separate fullscreen Tauri window. The operator selects a connected display, and Live slides and alerts are synchronized to that window. Verify display routing and reopening behavior in the desktop app.
 - KJV keyword search occupies its own results view to keep the passage controls usable; choosing a result clears the search results and returns to the verse browser. Unsaved show changes offer save, discard or stay when changing projects or leaving.
-- The Videos / Images feed now imports PNG, JPEG, GIF and WebP images into BibleShow's local media library. Images can be previewed, sent Live and saved by media reference in local presentations. Video playback is the next media task.
-- The four-area layout includes resizable project/show, Preview/Live, content-feed, and local display-control areas. Only Bible and Lyrics feeds are connected to local content; remaining feed categories are placeholders.
+- The Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into BibleShow's local media library. Media can be previewed, sent Live and saved by reference; video playback is muted and loops.
+- The Presentations feed browses saved local projects and their slides. Operators can Preview or send a slide Live, add one slide to the current show, or add all slides.
+- The four-area layout includes resizable project/show, Preview/Live, content-feed, and local display-control areas. Bible, Lyrics, Videos / Images, and Presentations feeds are connected; Live Feed and other categories remain planned.
 - The Profile/Edit/View/Settings/Connections/Plugins toolbar headings are visible, but detailed sub-items remain open for user brainstorming. Add future suggestions here as they arrive.
 - The product plan and navigation no longer include a dedicated Bible Study workspace. Scripture lookup remains part of presentation preparation.
 

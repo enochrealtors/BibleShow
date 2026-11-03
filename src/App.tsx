@@ -30,9 +30,9 @@ type ChapterData = { book_number: number; name: string; chapter_number: number; 
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
-type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string }
+type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string }
 type QueuedSlide = PresentationSlide & { queueId: string }
-type MediaFile = { id: string; filename: string; mediaType: string; mimeType: string; localPath: string; fileSize: number }
+type MediaFile = { id: string; filename: string; mediaType: 'image' | 'video'; mimeType: string; localPath: string; fileSize: number }
 type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null }
 type DisplaySummary = { index: number; name: string; x: number; y: number; width: number; height: number }
 type PendingProjectAction = { kind: 'leave' } | { kind: 'new' } | { kind: 'open'; id: number }
@@ -308,7 +308,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     if (!raw) return
     try {
       const slide = JSON.parse(raw) as PresentationSlide
-      if (!['scripture', 'lyrics', 'image'].includes(slide.kind) || !slide.sourceId || (slide.kind === 'image' ? !slide.mediaId || !slide.mediaPath : !slide.body)) return
+      if (!['scripture', 'lyrics', 'image', 'video'].includes(slide.kind) || !slide.sourceId || ((slide.kind === 'image' || slide.kind === 'video') ? !slide.mediaId || !slide.mediaPath : !slide.body)) return
       addToSequence(slide)
       setPersistenceMessage(`${slide.title} added to this show.`)
     } catch {
@@ -589,7 +589,8 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
               {activeFeed === 'bible' && <BibleSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} previewSourceId={previewSlide?.sourceId ?? null} searchRequest={bibleSearchRequest} />}
               {activeFeed === 'lyrics' && <SongSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
               {activeFeed === 'media' && <MediaSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
-              {activeFeed !== 'bible' && activeFeed !== 'lyrics' && activeFeed !== 'media' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>This content feed is planned. Its item types and controls will be designed before it is implemented.</p></div>}
+              {activeFeed === 'presentations' && <SavedPresentationsFeed presentations={presentations} onRefresh={refreshPresentations} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} />}
+              {activeFeed !== 'bible' && activeFeed !== 'lyrics' && activeFeed !== 'media' && activeFeed !== 'presentations' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>This content feed is planned. Its item types and controls will be designed before it is implemented.</p></div>}
             </div>
           </section>
         </main>
@@ -606,6 +607,44 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
       </div>
     </section>
   )
+}
+
+function SavedPresentationsFeed({ presentations, onRefresh, onPreview, onSendLive, onAdd, onAddMany }: {
+  presentations: PresentationSummary[]
+  onRefresh: () => Promise<void>
+  onPreview: (slide: PresentationSlide) => void
+  onSendLive: (slide: PresentationSlide) => void
+  onAdd: (slide: PresentationSlide) => void
+  onAddMany: (slides: PresentationSlide[]) => void
+}) {
+  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [saved, setSaved] = useState<SavedPresentation | null>(null)
+  const [loadError, setLoadError] = useState<{ id: number; text: string } | null>(null)
+  const busy = selectedId !== null && saved?.id !== selectedId && loadError?.id !== selectedId
+  const message = selectedId !== null && loadError?.id === selectedId ? loadError.text : ''
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    if (selectedId === null) return
+    invoke<SavedPresentation>('load_presentation', { presentationId: selectedId }).then((result) => {
+      if (active) { setSaved(result); setLoadError(null) }
+    }).catch((error) => { if (active) setLoadError({ id: selectedId, text: String(error) }) })
+    return () => { active = false }
+  }, [selectedId])
+
+  return <div className="saved-presentations-feed source-browser">
+    <header className="media-feed-toolbar"><div><strong>Saved presentations</strong><span>{presentations.length} projects saved on this device</span></div><button className="media-import-button" onClick={() => { void onRefresh() }}>Refresh</button></header>
+    <div className="saved-presentations-body">
+      <nav className="saved-presentation-list" aria-label="Saved presentations">{presentations.map((item) => <button key={item.id} className={selectedId === item.id ? 'selected' : ''} onClick={() => setSelectedId(item.id)}><strong>{item.title}</strong><span>{item.slideCount} slides · {item.updatedAt}</span></button>)}{presentations.length === 0 && <p>No saved presentations yet. Save a show from the left panel to see it here.</p>}</nav>
+      <section className="saved-presentation-detail" aria-label="Presentation items">
+        {busy && <p className="source-error">Loading presentation…</p>}
+        {message && <p className="source-error">{message}</p>}
+        {!busy && selectedId !== null && saved?.id === selectedId && <><header><div><strong>{saved.title}</strong><span>{saved.slides.length} slides</span></div><button disabled={!saved.slides.length} onClick={() => onAddMany(saved.slides)}>Add all to show</button></header><div className="saved-presentation-slides">{saved.slides.map((slide, index) => <article key={`${slide.sourceId}-${index}`}><button className="saved-slide-select" onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}><strong>{index + 1}. {slide.title}</strong><span>{slide.kind === 'scripture' || slide.kind === 'lyrics' ? slide.body : slide.kind.toUpperCase()}</span></button><button className="saved-slide-add" aria-label={`Add ${slide.title} to this show`} onClick={() => onAdd(slide)}>＋</button></article>)}</div></>}
+        {!busy && selectedId === null && <p className="source-error">Select a saved presentation to browse its slides.</p>}
+      </section>
+    </div>
+  </div>
 }
 
 function MonitorPanel({ type, slide, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
@@ -810,6 +849,8 @@ function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { 
       for (const file of Array.from(selected)) {
         const name = encoder.encode(file.name)
         if (!name.length || name.length > 510) throw new Error(`${file.name} has a filename that is too long.`)
+        if (file.type.startsWith('image/') && file.size > 25 * 1024 * 1024) throw new Error(`${file.name} is larger than the 25 MB image limit.`)
+        if (file.type.startsWith('video/') && file.size > 250 * 1024 * 1024) throw new Error(`${file.name} is larger than the 250 MB video limit.`)
         const contents = new Uint8Array(await file.arrayBuffer())
         const packet = new Uint8Array(2 + name.length + contents.length)
         packet[0] = (name.length >> 8) & 0xff
@@ -825,22 +866,23 @@ function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { 
   }
 
   return <div className="source-browser media-source-browser">
-    <div className="media-feed-toolbar"><div><strong>Image library</strong><span>{files.length} images on this device</span></div><label className="media-import-button">{busy ? 'Importing…' : 'Import images'}<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple disabled={busy} onChange={(event) => { void importImages(event.currentTarget.files); event.currentTarget.value = '' }} /></label></div>
+    <div className="media-feed-toolbar"><div><strong>Videos &amp; Images</strong><span>{files.length} local media files · video is muted during playback</span></div><label className="media-import-button">{busy ? 'Importing…' : 'Import media'}<input type="file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm" multiple disabled={busy} onChange={(event) => { void importImages(event.currentTarget.files); event.currentTarget.value = '' }} /></label></div>
     {displayMessage && <p className="media-feed-message" role="status">{displayMessage}</p>}
     <div className="media-image-grid">{files.map((file) => {
-      const slide: PresentationSlide = { sourceId: `media:${file.id}`, title: file.filename, subtitle: 'Image', body: '', reference: file.filename, kind: 'image', mediaId: file.id, mediaPath: file.localPath }
+      const slide: PresentationSlide = { sourceId: `media:${file.id}`, title: file.filename, subtitle: file.mediaType === 'video' ? 'Video' : 'Image', body: '', reference: file.filename, kind: file.mediaType, mediaId: file.id, mediaPath: file.localPath }
       const isPreview = previewSourceId === slide.sourceId
       return <article className={`media-image-card${isPreview ? ' is-preview' : ''}`} key={file.id}>
-        <button className="media-image-preview" aria-label={`Preview ${file.filename}; double-click to send Live`} onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}><img src={convertFileSrc(file.localPath)} alt="" loading="lazy" /><span>{file.filename}</span></button>
+        <button className="media-image-preview" aria-label={`Preview ${file.filename}; double-click to send Live`} onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}>{file.mediaType === 'image' ? <img src={convertFileSrc(file.localPath)} alt="" loading="lazy" /> : <video src={convertFileSrc(file.localPath)} muted playsInline preload="metadata" />}<span>{file.filename}</span></button>
         <button className="media-image-add" onClick={() => onAdd(slide)} aria-label={`Add ${file.filename} to this show`}>＋</button>
       </article>
-    })}{!files.length && !busy && <p className="media-library-empty">Import PNG, JPEG, GIF or WebP images to use them as presentation slides.</p>}</div>
+    })}{!files.length && !busy && <p className="media-library-empty">Import PNG, JPEG, GIF, WebP, MP4 or WebM media files to use them as presentation slides.</p>}</div>
   </div>
 }
 
 function SlideScreen({ slide, emptyLabel }: { slide: PresentationSlide | null; emptyLabel: string }) {
   if (!slide) return <div className="operator-screen is-empty"><div><Icon name="screen" size={23} /><span>{emptyLabel}</span></div></div>
   if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /><strong>{slide.reference}</strong></article>
+  if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><video src={convertFileSrc(slide.mediaPath)} autoPlay loop muted playsInline /><strong>{slide.reference}</strong></article>
   return <article className={`operator-screen ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{slide.subtitle}</span><p>{slide.body}</p><strong>{slide.reference}</strong></article>
 }
 
@@ -859,7 +901,7 @@ export function AudienceWindow() {
   }, [])
 
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><video src={convertFileSrc(snapshot.slide.mediaPath)} autoPlay loop muted playsInline /></article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
   </main>
 }

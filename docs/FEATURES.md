@@ -63,12 +63,13 @@ No feature should be marked implemented until it has been tested.
 - [~] Full-window presentation mode, hiding the global sidebar and redundant page/header chrome.
 - [~] Resizable four-area operator layout with larger text and dedicated content-feed scrolling (desktop review pending).
 - [~] Left panel for saved projects and current-show items, including drag/drop from Bible/Lyrics feeds, JSON import/export, and save-before-close prompt.
-- [~] Content-feed tabs for Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Media, Themes, Functions, and Overlays; only Bible and Lyrics are wired to local content so far.
+- [~] Content-feed tabs for Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Media, Themes, Functions, and Overlays; Bible, Lyrics, Videos/Images, and saved Presentations are connected to local content.
 - [x] KJV reference/range and keyword search in the presentation workspace.
 - [x] Multi-verse passages are staged as one readable verse per slide.
 - [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.
 - [x] Lyrics feed shows song sections alongside the song list.
-- [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images into the local library and stages them as presentation slides; video playback remains future work.
+- [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into the local library, stages them as presentation slides, and supports muted looping playback in Preview and audience output.
+- [~] Presentations feed browses saved local projects and their slides, with controls to Preview, send Live, add one slide, or add the full presentation to the current show.
 - [x] Keyword search results use a dedicated view and clear when a verse is selected.
 - [x] Unsaved project changes prompt to save, discard, or stay before leaving, starting a new show, or opening another project.
 - [~] Right-panel controls for clearing Preview/Live content, closing the local Live monitor, and static/scrolling alerts in that monitor.
