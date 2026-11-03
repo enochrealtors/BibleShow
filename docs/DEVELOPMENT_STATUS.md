@@ -203,7 +203,7 @@ The next development sequence is:
 
 1. Verify keyword results-only browsing, passage staging, the unsaved-show prompt, and project import/export in the Tauri app.
 2. Exercise local project save/load/delete and fullscreen audience output reopening on available displays in the Tauri app.
-3. Continue with the next planned feed, Live Feed, designing its source and controls before implementation; then proceed to URL Media and remaining feed categories.
+3. Implement the network Live Feed from `docs/LIVE_FEED_DESIGN.md`: RTSP receive/display first, then NDI® discovery/receive after SDK distribution review.
 4. Review KJV/song rights for target release markets before bundling content in a public build; review the 700 incomplete songs when verified lyric sources become available.
 
 Do not jump ahead to advanced AI or cloud functionality.
@@ -221,4 +221,4 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Build and launch the Tauri app to review Bible keyword results, unsaved-show prompts, media import/playback, the saved Presentations feed, and audience output alongside passage staging and project workflows. Then design and implement Live Feed as the next content-feed stage.
+**Current restart point:** Review the video and saved Presentations feed in the Tauri desktop app. Then implement Live Feed using the native backend and shared Preview/audience output described in `docs/LIVE_FEED_DESIGN.md`; the current host lacks the GStreamer/NDI development runtimes needed to build that stage.
