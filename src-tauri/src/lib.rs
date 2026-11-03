@@ -5,6 +5,7 @@ use roxmltree::{Document, Node};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use percent_encoding::percent_decode_str;
 use std::{fs, io::Read, path::PathBuf};
 use tauri::{
     Manager,
@@ -634,21 +635,30 @@ fn import_lyrics_resources(app: tauri::AppHandle, request: Request<'_>) -> Resul
     Ok(ResourceImportSummary { imported, skipped, detail: format!("Imported {imported} lyrics resources; skipped {skipped} duplicates or empty items.") })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn import_media_file(app: tauri::AppHandle, request: Request<'_>) -> Result<MediaFileSummary, String> {
     let packet = match request.body() {
         InvokeBody::Raw(bytes) => bytes.as_slice(),
-        InvokeBody::Json(_) => return Err("Choose the image again; its binary data was not received.".into()),
+        InvokeBody::Json(_) => return Err("Choose the media again; its binary data was not received.".into()),
     };
     if packet.len() < 3 || packet.len() > MAX_VIDEO_BYTES + 512 {
-        return Err("Choose an image smaller than 25 MB or a video smaller than 250 MB.".into());
+        return Err("Choose a non-empty image smaller than 25 MB or video smaller than 250 MB.".into());
     }
-    let name_length = u16::from_be_bytes([packet[0], packet[1]]) as usize;
-    if name_length == 0 || name_length > 510 || packet.len() <= name_length + 2 {
-        return Err("The selected image has an invalid filename or empty file.".into());
-    }
-    let input_name = std::str::from_utf8(&packet[2..2 + name_length]).map_err(|_| "The image filename is not valid UTF-8.".to_string())?;
-    let bytes = &packet[2 + name_length..];
+    let (input_name, bytes) = if let Some(header) = request.headers().get("x-bibleshow-filename") {
+        let encoded = header.to_str().map_err(|_| "The media filename is invalid.".to_string())?;
+        let filename = percent_decode_str(encoded).decode_utf8().map_err(|_| "The media filename is not valid UTF-8.".to_string())?.into_owned();
+        if filename.is_empty() || filename.len() > 510 || filename.chars().any(|character| character.is_control() || character == '/' || character == '\\') { return Err("The selected media has an invalid filename.".into()); }
+        (filename, packet)
+    } else {
+        // Accept the legacy payload format so older frontend builds can still import media.
+        let name_length = u16::from_be_bytes([packet[0], packet[1]]) as usize;
+        if name_length == 0 || name_length > 510 || packet.len() <= name_length + 2 {
+            return Err("The selected media has an invalid filename or empty file.".into());
+        }
+        let filename = std::str::from_utf8(&packet[2..2 + name_length]).map_err(|_| "The media filename is not valid UTF-8.".to_string())?.to_string();
+        (filename, &packet[2 + name_length..])
+    };
+    if bytes.is_empty() { return Err("The selected media file is empty.".into()); }
     let (media_type, extension, mime_type) = detect_media_type(bytes).ok_or_else(|| "This media format is not supported. Choose PNG, JPEG, GIF, WebP, MP4, or WebM.".to_string())?;
     if media_type == "image" && bytes.len() > MAX_IMAGE_BYTES { return Err("Choose an image smaller than 25 MB.".into()); }
     if media_type == "video" && bytes.len() > MAX_VIDEO_BYTES { return Err("Choose a video smaller than 250 MB.".into()); }
@@ -662,8 +672,20 @@ fn import_media_file(app: tauri::AppHandle, request: Request<'_>) -> Result<Medi
     let media_dir = app_data.join("media");
     fs::create_dir_all(&media_dir).map_err(|error| format!("Could not create BibleShow's media folder: {error}"))?;
     let local_path = media_dir.join(format!("{digest}.{extension}"));
-    if !local_path.exists() {
-        fs::write(&local_path, bytes).map_err(|error| format!("Could not store this image in BibleShow: {error}"))?;
+    let stored_bytes = local_path.metadata().map(|metadata| metadata.len()).unwrap_or_default();
+    if stored_bytes != bytes.len() as u64 {
+        let temporary_path = media_dir.join(format!(".{digest}.tmp-{}", uuid::Uuid::new_v4()));
+        if let Err(error) = fs::write(&temporary_path, bytes) {
+            let _ = fs::remove_file(&temporary_path);
+            return Err(format!("Could not store this media in BibleShow: {error}"));
+        }
+        if local_path.exists() {
+            fs::remove_file(&local_path).map_err(|error| format!("Could not replace an incomplete media file: {error}"))?;
+        }
+        if let Err(error) = fs::rename(&temporary_path, &local_path) {
+            let _ = fs::remove_file(&temporary_path);
+            return Err(format!("Could not finish storing this media file: {error}"));
+        }
     }
     let local_path_string = local_path.to_string_lossy().into_owned();
     let db = open_library(&app)?;

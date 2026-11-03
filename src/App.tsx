@@ -1077,9 +1077,11 @@ function SongSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { o
 
 function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onAdd: (slide: PresentationSlide) => void; previewSourceId: string | null }) {
   const [files, setFiles] = useState<MediaFile[]>([])
+  const [mediaFilter, setMediaFilter] = useState<'all' | 'image' | 'video'>('all')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
-  const displayMessage = message || (!isTauri() ? 'Open the desktop app to import and display local images.' : '')
+  const displayMessage = message || (!isTauri() ? 'Open the desktop app to import and display local media.' : '')
+  const visibleFiles = files.filter((file) => mediaFilter === 'all' || file.mediaType === mediaFilter)
 
   useEffect(() => {
     if (!isTauri()) return
@@ -1088,50 +1090,65 @@ function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { 
     return () => { active = false }
   }, [])
 
-  async function importImages(selected: FileList | null) {
+  async function importMedia(selected: FileList | null) {
     if (!selected?.length) return
     setBusy(true)
-    setMessage(`Importing ${selected.length} image${selected.length === 1 ? '' : 's'}…`)
+    const selectedFiles = Array.from(selected)
+    const imageCount = selectedFiles.filter((file) => /\.(png|jpe?g|gif|webp)$/i.test(file.name)).length
+    const videoCount = selectedFiles.length - imageCount
+    const mediaLabel = [imageCount ? `${imageCount} image${imageCount === 1 ? '' : 's'}` : '', videoCount ? `${videoCount} video${videoCount === 1 ? '' : 's'}` : ''].filter(Boolean).join(' and ')
+    setMessage(`Importing ${mediaLabel}…`)
+    const imported: MediaFile[] = []
     try {
-      const imported: MediaFile[] = []
-      const encoder = new TextEncoder()
-      for (const file of Array.from(selected)) {
-        const name = encoder.encode(file.name)
-        if (!name.length || name.length > 510) throw new Error(`${file.name} has a filename that is too long.`)
-        if (file.type.startsWith('image/') && file.size > 25 * 1024 * 1024) throw new Error(`${file.name} is larger than the 25 MB image limit.`)
-        if (file.type.startsWith('video/') && file.size > 250 * 1024 * 1024) throw new Error(`${file.name} is larger than the 250 MB video limit.`)
+      const filenameEncoder = new TextEncoder()
+      for (let index = 0; index < selectedFiles.length; index += 1) {
+        const file = selectedFiles[index]
+        if (!file.name || filenameEncoder.encode(file.name).length > 510) throw new Error(`${file.name} has a filename that is too long.`)
+        if (!file.size) throw new Error(`${file.name} is empty.`)
+        if (/\.(png|jpe?g|gif|webp)$/i.test(file.name) && file.size > 25 * 1024 * 1024) throw new Error(`${file.name} is larger than the 25 MB image limit.`)
+        if (/\.(mp4|webm)$/i.test(file.name) && file.size > 250 * 1024 * 1024) throw new Error(`${file.name} is larger than the 250 MB video limit.`)
+        setMessage(`Importing ${file.name} (${index + 1} of ${selectedFiles.length})…`)
         const contents = new Uint8Array(await file.arrayBuffer())
-        const packet = new Uint8Array(2 + name.length + contents.length)
-        packet[0] = (name.length >> 8) & 0xff
-        packet[1] = name.length & 0xff
-        packet.set(name, 2)
-        packet.set(contents, 2 + name.length)
-        imported.push(await invoke<MediaFile>('import_media_file', packet))
+        const item = await invoke<MediaFile>('import_media_file', contents, { headers: { 'x-bibleshow-filename': encodeURIComponent(file.name) } })
+        imported.push(item)
+        setFiles((current) => [item, ...current.filter((existing) => existing.id !== item.id)])
       }
-      setFiles((current) => [...imported, ...current.filter((file) => !imported.some((item) => item.id === file.id))])
-      setMessage(`${imported.length} image${imported.length === 1 ? '' : 's'} added to this device.`)
-    } catch (error) { setMessage(String(error)) }
+      const importedImages = imported.filter((file) => file.mediaType === 'image').length
+      const importedVideos = imported.length - importedImages
+      const importedLabels = [importedImages ? `${importedImages} image${importedImages === 1 ? '' : 's'}` : '', importedVideos ? `${importedVideos} video${importedVideos === 1 ? '' : 's'}` : ''].filter(Boolean)
+      setMessage(importedLabels.length ? `Added ${importedLabels.join(' and ')} to this device.` : 'Those media files are already in your library.')
+    } catch (error) {
+      setMessage(imported.length ? `Added ${imported.length} media file${imported.length === 1 ? '' : 's'} before the next file failed: ${String(error)}` : String(error))
+    }
     finally { setBusy(false) }
   }
 
   return <div className="source-browser media-source-browser">
-    <div className="media-feed-toolbar"><div><strong>Videos &amp; Images</strong><span>{files.length} local media files · video is muted during playback</span></div><label className="media-import-button">{busy ? 'Importing…' : 'Import media'}<input type="file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm" multiple disabled={busy} onChange={(event) => { void importImages(event.currentTarget.files); event.currentTarget.value = '' }} /></label></div>
+    <div className="media-feed-toolbar"><div><strong>Videos &amp; Images</strong><span>{files.filter((file) => file.mediaType === 'image').length} images · {files.filter((file) => file.mediaType === 'video').length} videos · videos play muted</span></div><div className="media-type-filter" role="group" aria-label="Filter media library">{(['all', 'image', 'video'] as const).map((filter) => <button key={filter} type="button" aria-pressed={mediaFilter === filter} onClick={() => setMediaFilter(filter)}>{filter === 'all' ? 'All' : filter === 'image' ? 'Images' : 'Videos'}</button>)}</div><label className="media-import-button">{busy ? 'Importing…' : 'Import media'}<input type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm" multiple disabled={busy} onChange={(event) => { void importMedia(event.currentTarget.files); event.currentTarget.value = '' }} /></label></div>
     {displayMessage && <p className="media-feed-message" role="status">{displayMessage}</p>}
-    <div className="media-image-grid">{files.map((file) => {
+    <div className="media-image-grid">{visibleFiles.map((file) => {
       const slide: PresentationSlide = { sourceId: `media:${file.id}`, title: file.filename, subtitle: file.mediaType === 'video' ? 'Video' : 'Image', body: '', reference: file.filename, kind: file.mediaType, mediaId: file.id, mediaPath: file.localPath }
       const isPreview = previewSourceId === slide.sourceId
       return <article className={`media-image-card${isPreview ? ' is-preview' : ''}`} key={file.id}>
-        <button className="media-image-preview" aria-label={`Preview ${file.filename}; double-click to send Live`} onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}>{file.mediaType === 'image' ? <img src={convertFileSrc(file.localPath)} alt="" loading="lazy" /> : <video src={convertFileSrc(file.localPath)} muted playsInline preload="metadata" />}<span>{file.filename}</span></button>
+        <button className="media-image-preview" aria-label={`Preview ${file.filename}; double-click to send Live`} onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}>{file.mediaType === 'image' ? <img src={convertFileSrc(file.localPath)} alt="" loading="lazy" /> : <LocalVideo src={convertFileSrc(file.localPath)} label={file.filename} preload="metadata" />}<span>{file.filename}</span></button>
         <button className="media-image-add" onClick={() => onAdd(slide)} aria-label={`Add ${file.filename} to this show`}>＋</button>
       </article>
-    })}{!files.length && !busy && <p className="media-library-empty">Import PNG, JPEG, GIF, WebP, MP4 or WebM media files to use them as presentation slides.</p>}</div>
+    })}{!visibleFiles.length && !busy && <p className="media-library-empty">{files.length ? `No ${mediaFilter === 'image' ? 'images' : 'videos'} are in this library yet.` : 'Import PNG, JPEG, GIF, WebP, MP4 or WebM media files to use them as presentation slides.'}</p>}</div>
+  </div>
+}
+
+function LocalVideo({ src, label, autoPlay = false, loop = false, preload = 'metadata' }: { src: string; label: string; autoPlay?: boolean; loop?: boolean; preload?: 'none' | 'metadata' | 'auto' }) {
+  const [failed, setFailed] = useState(false)
+  return <div className={`local-video-frame${failed ? ' has-error' : ''}`}>
+    <video src={src} aria-label={label} autoPlay={autoPlay} loop={loop} muted playsInline preload={preload} onError={() => setFailed(true)} onCanPlay={() => setFailed(false)} />
+    {failed && <span role="status">This video could not be loaded or decoded by the current desktop webview.</span>}
   </div>
 }
 
 function SlideScreen({ slide, cameraStream, emptyLabel }: { slide: PresentationSlide | null; cameraStream: MediaStream | null; emptyLabel: string }) {
   if (!slide) return <div className="operator-screen is-empty"><div><Icon name="screen" size={23} /><span>{emptyLabel}</span></div></div>
   if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /><strong>{slide.reference}</strong></article>
-  if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><video src={convertFileSrc(slide.mediaPath)} autoPlay loop muted playsInline /><strong>{slide.reference}</strong></article>
+  if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><LocalVideo src={convertFileSrc(slide.mediaPath)} label={slide.reference} autoPlay loop /><strong>{slide.reference}</strong></article>
   if (slide.kind === 'live' && slide.liveStreamKind === 'camera') return <article className="operator-screen video-screen"><LiveVideo stream={cameraStream} label="Live camera feed" /></article>
   if (slide.kind === 'live' && slide.liveStreamKind === 'youtube' && slide.youtubeVideoId) return <article className="operator-screen video-screen"><iframe src={youtubeEmbedUrl(slide.youtubeVideoId, true)} title="YouTube Live preview" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article>
   if (slide.kind === 'live' && slide.liveStreamUrl) return <article className="operator-screen video-screen">{slide.liveStreamKind === 'mjpeg' ? <img src={slide.liveStreamUrl} alt="Live MJPEG feed" /> : <video src={slide.liveStreamUrl} autoPlay muted playsInline />}</article>
@@ -1195,7 +1212,7 @@ export function AudienceWindow() {
   }, [cameraSourceId])
 
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><video src={convertFileSrc(snapshot.slide.mediaPath)} autoPlay loop muted playsInline /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><LocalVideo src={convertFileSrc(snapshot.slide.mediaPath)} label={snapshot.slide.reference} autoPlay loop preload="auto" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
   </main>
 }

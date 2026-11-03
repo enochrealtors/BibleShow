@@ -635,11 +635,11 @@ This section must be updated as development progresses.
 - The former Live status strip now provides KJV reference/range and keyword search. Multi-verse passages are added as one verse per slide. Single-click stages Preview; double-click or Enter sends directly to Live. Song sections remain visible beside the song list.
 - The audience output is a separate fullscreen Tauri window. The operator selects a connected display, and Live slides and alerts are synchronized to that window. Verify display routing and reopening behavior in the desktop app.
 - KJV keyword search occupies its own results view to keep the passage controls usable; choosing a result clears the search results and returns to the verse browser. Unsaved show changes offer save, discard or stay when changing projects or leaving.
-- The Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into BibleShow's local media library. Media can be previewed, sent Live and saved by reference; video playback is muted and loops.
+- The Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into BibleShow's local media library. Uploads send raw bytes without creating a second full-file buffer, and storage uses temporary files to avoid registering truncated uploads. Media can be previewed, sent Live and saved by reference; video playback is muted and loops. Desktop upload and codec playback review remains pending; see `docs/MEDIA_IMPORT_DESIGN.md`.
 - The Presentations feed browses saved local projects and their slides. Operators can Preview or send a slide Live, add one slide to the current show, or add all slides.
 - Live Feed prioritizes connected cameras/webcams and browser-playable direct HTTP(S) endpoints without an app-level GStreamer bridge. Camera capture stays in the operator window and is relayed to the audience window using WebRTC; HTTP(S) endpoints can be video/HLS or MJPEG when supported by the platform WebView. YouTube watch/live links are recognized and shown with YouTube's embedded player, separate from the direct-stream formats. URLs are held in memory only; the URL input is visible by default with a hide control. RTSP/RTSPS remains an experimental optional GStreamer adapter, and NDI is not implemented. Desktop permission, playback and cross-platform checks remain pending; see `docs/LIVE_FEED_DESIGN.md`.
 - The four-area layout includes resizable project/show, Preview/Live, content-feed, and local display-control areas. Bible, Lyrics, Videos / Images, Presentations, and the initial Live Feed paths have implementation; camera/URL runtime review remains pending and other feed categories remain planned.
-- Next requested source-library work: support Bible USFM/USX, OSIS and Zefania XML, plus lyrics OpenLyrics, OpenSong, OpenLP export, TXT and CSV. Afterward, verify and repair Video / Image upload and playback in the desktop workflow; MP4/WebM code is present but not yet verified by the user.
+- Multi-format Bible and lyrics import is implemented for USFM/USX, OSIS, Zefania XML, OpenLyrics/OpenSong/OpenLP XML, TXT and CSV. Verify imports in the desktop app when convenient; see `docs/RESOURCE_IMPORT_DESIGN.md`.
 - The Profile/Edit/View/Settings/Connections/Plugins toolbar headings are visible, but detailed sub-items remain open for user brainstorming. Add future suggestions here as they arrive.
 - The product plan and navigation no longer include a dedicated Bible Study workspace. Scripture lookup remains part of presentation preparation.
 
@@ -670,7 +670,7 @@ These are the versions recorded during initial setup, not permanent requirements
 
 1. Verify the full-window layout, larger typography, feed scrolling, resizers, project import/export, save-before-close, display controls and alerts in the desktop app.
 2. Verify Bible keyword result selection, the unsaved-show prompt, project management and fullscreen audience output in the Tauri desktop app.
-3. Add video import/playback and verify local image slides and project persistence in the Tauri desktop app.
+3. Verify the optimized MP4/WebM upload path, codec errors, Preview/Live and saved local media slides in the Tauri desktop app.
 4. Define remaining content-feed and toolbar sub-items with the user before implementing each.
 5. Verify local presentation save/load/delete at runtime.
 

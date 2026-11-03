@@ -35,13 +35,15 @@ You are continuing development of **BibleShow**, an offline-first church present
 - Saved Presentations feed can browse projects, Preview or send individual slides Live, add one slide, or add all slides to the current show.
 - SQLite schema is currently version 5.
 
-### Current development stage: multi-format Bible and Lyrics imports
+### Current development stage: Videos / Images upload and playback
 
-The Live Feed implementation now supports operator-window camera/webcam capture, a WebRTC relay of the same camera to audience output, direct HTTP(S) video/HLS and MJPEG endpoints, YouTube watch/live links via YouTube's embed player, plus the existing optional experimental RTSP/GStreamer adapter. An Ubuntu 24.04 x64 workflow now packages a Debian trial installer; run it, retrieve the artifact, and verify on the user's laptop before continuing. The code is not yet validated on Windows WebView2 or Ubuntu WebKitGTK. YouTube playback may still be blocked when the owner disables embedding or the web player requires a user click.
+The Live Feed implementation supports operator-window camera/webcam capture, a WebRTC relay of the same camera to audience output, direct HTTP(S) video/HLS and MJPEG endpoints, YouTube watch/live links via YouTube's embed player, plus the existing optional experimental RTSP/GStreamer adapter. An Ubuntu 24.04 x64 trial installer workflow exists, but the user has deferred packaging and will review the app with `cargo tauri dev` from the source checkout. The code is not yet validated on Windows WebView2 or Ubuntu WebKitGTK. YouTube playback may still be blocked when the owner disables embedding or the web player requires a user click.
 
 Implemented in the current checkout: resource-library imports for the formats below, with translation-aware Bible browsing and saved Scripture slides. Review `docs/RESOURCE_IMPORT_DESIGN.md` for parser boundaries and import limits. Desktop review is still required for real-world files and display formatting.
 
-After verifying imports in the desktop app, revisit Videos / Images. PNG/JPEG/GIF/WebP image import and MP4/WebM video import/playback code exists, but the user reports video uploads are not working and desktop verification is still outstanding. Diagnose and fix that workflow before broadening media formats.
+The current next step is desktop verification of MP4/WebM import and playback in the Videos / Images feed. See `docs/MEDIA_IMPORT_DESIGN.md` for the implementation and review checklist. The webview upload now sends raw file bytes with the filename in request metadata to avoid a duplicate full-size buffer; the Rust importer accepts the previous packet format as well. Media writes use a temporary file before installation, and local playback shows a codec error if the active WebView cannot decode the file. The user will run `cargo tauri dev` and review the app when available.
+
+If desktop verification succeeds, continue with media-library management (remove/rename, file details and relinking) only after reviewing the current project plan and user feedback. If upload or playback still fails, capture the displayed error and distinguish an import/storage failure from a codec/WebView decode failure before changing formats or dependencies.
 
 Formats selected by the user:
 

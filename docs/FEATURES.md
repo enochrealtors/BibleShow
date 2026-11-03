@@ -72,9 +72,9 @@ No feature should be marked implemented until it has been tested.
 - [x] Multi-verse passages are staged as one readable verse per slide.
 - [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.
 - [x] Lyrics feed shows song sections alongside the song list.
-- [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into the local library, stages them as presentation slides, and supports muted looping playback in Preview and audience output; verify the reported video-upload issue in the desktop app.
-- [ ] Import Bible resources in USFM/USX, OSIS and Zefania XML formats.
-- [ ] Import lyrics in OpenLyrics, OpenSong, OpenLP export, TXT and CSV formats.
+- [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into the local library, stages them as presentation slides, and supports muted looping playback in Preview and audience output. Uploads avoid a second full-file buffer and use temporary-file installation; confirm behavior in the desktop app.
+- [~] Import Bible resources in USFM/USX, OSIS and Zefania XML formats; desktop review remains.
+- [~] Import lyrics in OpenLyrics/OpenSong/OpenLP XML, TXT and CSV formats; desktop review remains.
 - [~] Presentations feed browses saved local projects and their slides, with controls to Preview, send Live, add one slide, or add the full presentation to the current show.
 - [x] Keyword search results use a dedicated view and clear when a verse is selected.
 - [x] Unsaved project changes prompt to save, discard, or stay before leaving, starting a new show, or opening another project.
@@ -265,7 +265,7 @@ Current implementation snapshot:
 - [~] Bible Engine supports local KJV import, reference/range and keyword search in the presentation workflow.
 - [~] Resource library imports support USFM/SFM, USX, OSIS, Zefania, OpenLyrics, OpenSong/OpenLP XML, TXT and CSV; desktop import review remains.
 - [~] Presentation Engine supports the operator sequence, Preview/Live, saved projects and fullscreen audience output; runtime review continues.
-- [~] Media Engine supports local image/video sources and an RTSP receiver; desktop playback and Windows GStreamer packaging remain.
+- [~] Media Engine supports local image/video sources and an RTSP receiver. Local upload now avoids a duplicate large buffer and protects against truncated writes; MP4/WebM codec playback still needs desktop verification.
 - [ ] Detection Engine implemented.
 - [ ] Cloud synchronisation implemented.
 

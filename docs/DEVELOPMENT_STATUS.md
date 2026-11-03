@@ -96,6 +96,12 @@ Versions are historical records and should be checked before major upgrades.
 - Added translation selection to the Bible feed, keyword search, and persisted Scripture slides. KJV remains the default version.
 - Added `docs/RESOURCE_IMPORT_DESIGN.md` with format support, import limits, parser boundaries and desktop-review notes.
 - Frontend and Rust compile checks are in progress; imported multi-version data and formatting still need review in the desktop app. The build was intentionally kept at the library-import stage while desktop packaging is deferred.
+- Reworked local media upload to send file bytes as Tauri's raw request body and carry the filename in a request header, avoiding a second full-size buffer for large videos. The Rust importer still accepts the prior packet format for compatibility.
+- Moved the synchronous hashing/storage command off the Tauri main UI thread so large media files do not freeze the operator window during import.
+- Media files are written through a temporary file before being installed into the library, reducing the chance that an interrupted large upload leaves a truncated video in the catalog. The media feed now reports image/video counts and per-file progress, and local video playback failures show a WebView codec message.
+- Successful files are added to the feed one at a time, so a later error in a multi-file selection does not hide earlier imports. Added `docs/MEDIA_IMPORT_DESIGN.md` with the upload/playback boundary and desktop review checklist.
+- The Ubuntu environment has GStreamer H.264 and VP8 decoders available. This does not by itself confirm that its WebKitGTK webview can play the local files; the desktop review still needs to check the actual window.
+- Rechecked media imports with frontend type/lint/build and Rust compile checks; actual MP4/WebM upload and playback still need confirmation in the desktop app on the user's Ubuntu laptop.
 
 ### Desktop foundation
 - Tauri 2 initialised.
@@ -205,10 +211,10 @@ Do not change working configuration unnecessarily.
 
 The next development sequence is:
 
-1. Verify Live Feed camera permission and selection, WebRTC audience relay, HTTP(S) video/HLS and MJPEG playback, and RTSP fallback on desktop. Confirm the stream stops and releases the camera cleanly.
-2. Expand the Bible and Lyrics import workflows: Bible USFM/USX, OSIS and Zefania XML; Lyrics OpenLyrics, OpenSong, OpenLP export, TXT and CSV. Include format validation, import preview, duplicate handling, metadata and transactional rollback.
-3. Revisit Videos / Images in the desktop app. MP4/WebM import and playback code already exists, but user workflow verification is still needed; fix the reported video upload gap before extending media formats.
-4. Resume broader display, rights, packaging and remaining feed work. NDI® and cross-platform GStreamer packaging remain separate optional adapter decisions.
+1. User desktop review of MP4/WebM upload, playback, Preview/Live, and saved-media slides; see `docs/MEDIA_IMPORT_DESIGN.md`.
+2. User desktop review of the new Bible and Lyrics import formats; see `docs/RESOURCE_IMPORT_DESIGN.md`.
+3. Verify Live Feed camera permission and selection, WebRTC audience relay, HTTP(S) video/HLS and MJPEG playback, and RTSP fallback on desktop. Confirm the stream stops and releases the camera cleanly.
+4. Continue broader display, rights and remaining feed work. NDI® and cross-platform GStreamer packaging remain separate optional adapter decisions. The user has deferred the desktop installer and plans to run the app from the Ubuntu source checkout.
 
 Do not jump ahead to advanced AI or cloud functionality.
 
