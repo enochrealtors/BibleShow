@@ -41,7 +41,7 @@ The user selected **network stream URL (RTSP/NDI)** as the first Live Feed sourc
 
 - Start with RTSP/RTSPS receive and display. Add NDI® discovery/receive as a separate follow-on after checking SDK distribution requirements.
 - Do not treat an RTSP URL as playable by an HTML `<video>` tag. Live video needs a native media backend and a transport path that works for both operator Preview and the separate audience window.
-- The Ubuntu environment used before handoff had no GStreamer or FFmpeg runtime/development packages installed. Check the current environment before choosing dependencies. Plan runtime/build requirements for supported desktop systems; avoid a UI-only placeholder that cannot play the stream.
+- This Ubuntu VM now has GStreamer 1.28 development libraries and tools/base/good/libav plugins installed. The Rust backend compiles here; Windows runtime packaging is not yet solved. Check the current environment before changing dependencies; avoid a UI-only placeholder that cannot play the stream.
 - Address source lifecycle (connect, stop, reconnect/error state), latency, Preview/Live behavior, project references, and credentials. Do not put credentials in visible labels or exported project files; decide on safe credential handling before persisting URLs that contain them.
 
 ### Working approach
@@ -53,6 +53,6 @@ The user selected **network stream URL (RTSP/NDI)** as the first Live Feed sourc
 
 ### Current Git handoff
 
-At the time this guide was created, the repository was pushed to `origin/main` at `b033956` (`docs: plan network live feed stage`), with a clean worktree. Verify current state because this guide will be committed afterward.
+At the initial handoff, the repository was pushed to `origin/main` at `2473572`. Check Git status and current history for the newer RTSP implementation; do not assume this guide or the remote has already been updated.
 
 ---

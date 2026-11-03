@@ -1,7 +1,7 @@
 # BIBLESHOW — MASTER FEATURE REGISTER
 
 **Document version:** 1.0
-**Last updated:** 2 November 2026
+**Last updated:** 3 November 2026
 
 ## STATUS KEY
 
@@ -63,7 +63,8 @@ No feature should be marked implemented until it has been tested.
 - [~] Full-window presentation mode, hiding the global sidebar and redundant page/header chrome.
 - [~] Resizable four-area operator layout with larger text and dedicated content-feed scrolling (desktop review pending).
 - [~] Left panel for saved projects and current-show items, including drag/drop from Bible/Lyrics feeds, JSON import/export, and save-before-close prompt.
-- [~] Content-feed tabs for Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Media, Themes, Functions, and Overlays; Bible, Lyrics, Videos/Images, and saved Presentations are connected to local content.
+- [~] Content-feed tabs for Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Media, Themes, Functions, and Overlays; Bible, Lyrics, Videos/Images, Presentations, and initial RTSP Live Feed are connected to local content.
+- [~] Connect one RTSP/RTSPS network source and route it through Preview and audience output; disconnect/error handling is implemented, desktop runtime verification and Windows GStreamer packaging remain.
 - [x] KJV reference/range and keyword search in the presentation workspace.
 - [x] Multi-verse passages are staged as one readable verse per slide.
 - [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.
@@ -248,16 +249,16 @@ The requested four-area layout, project/show workflow, content feed categories, 
 
 # 12. CURRENT IMPLEMENTATION STATUS
 
-At the time this document was created:
+Current implementation snapshot:
 
 - [x] React and TypeScript scaffold created.
 - [x] Vite configured.
 - [x] Tauri 2 initialised.
 - [x] Desktop application launched successfully.
-- [ ] Actual BibleShow interface implemented.
-- [ ] Bible Engine implemented.
-- [ ] Presentation Engine implemented.
-- [ ] Media Engine implemented.
+- [~] BibleShow operator interface implemented; desktop review continues.
+- [~] Bible Engine supports local KJV import, reference/range and keyword search in the presentation workflow.
+- [~] Presentation Engine supports the operator sequence, Preview/Live, saved projects and fullscreen audience output; runtime review continues.
+- [~] Media Engine supports local image/video sources and an RTSP receiver; desktop playback and Windows GStreamer packaging remain.
 - [ ] Detection Engine implemented.
 - [ ] Cloud synchronisation implemented.
 

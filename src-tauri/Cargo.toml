@@ -27,3 +27,8 @@ roxmltree = "0.21.2"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 zip = { version = "9.2.2", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 sha2 = "0.11.1"
+gstreamer = "0.25.2"
+gstreamer-app = "0.25.2"
+uuid = { version = "1", features = ["v4"] }
+url = "2"
+percent-encoding = "2"

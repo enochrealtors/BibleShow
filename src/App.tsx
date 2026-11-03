@@ -30,7 +30,7 @@ type ChapterData = { book_number: number; name: string; chapter_number: number; 
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
-type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string }
+type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; liveStreamUrl?: string }
 type QueuedSlide = PresentationSlide & { queueId: string }
 type MediaFile = { id: string; filename: string; mediaType: 'image' | 'video'; mimeType: string; localPath: string; fileSize: number }
 type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null }
@@ -38,6 +38,7 @@ type DisplaySummary = { index: number; name: string; x: number; y: number; width
 type PendingProjectAction = { kind: 'leave' } | { kind: 'new' } | { kind: 'open'; id: number }
 type PresentationSummary = { id: number; title: string; updatedAt: string; slideCount: number }
 type SavedPresentation = { id: number; title: string; slides: PresentationSlide[] }
+type LiveFeedInfo = { streamId: string; streamUrl: string }
 type PresentationFeed = 'bible' | 'lyrics' | 'media' | 'presentations' | 'live' | 'url' | 'themes' | 'functions' | 'overlays'
 const presentationFeedLabels: Record<PresentationFeed, string> = {
   bible: 'Bible', lyrics: 'Lyrics', media: 'Videos & Images', presentations: 'Presentations', live: 'Live Feed', url: 'URL Media', themes: 'Themes', functions: 'Functions', overlays: 'Overlays',
@@ -206,6 +207,7 @@ function HomePage({ onNavigate, library, importState, onImport }: { onNavigate: 
 
 function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [activeFeed, setActiveFeed] = useState<PresentationFeed>('bible')
+  const [liveFeedSlide, setLiveFeedSlide] = useState<PresentationSlide | null>(null)
   const [previewSlide, setPreviewSlide] = useState<PresentationSlide | null>(null)
   const [liveSlide, setLiveSlide] = useState<PresentationSlide | null>(null)
   const [sequence, setSequence] = useState<QueuedSlide[]>([])
@@ -229,7 +231,9 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [activeAlert, setActiveAlert] = useState<{ text: string; mode: 'static' | 'scrolling' } | null>(null)
   const hasUnsavedProjectChanges = projectSnapshot(presentationTitle, sequence) !== savedProjectSnapshot
   const audienceSnapshot = useRef<AudienceSnapshot>({ slide: null, alert: null })
+  const activeLiveFeedId = useRef<string | null>(null)
   audienceSnapshot.current = { slide: liveSlide, alert: activeAlert }
+  activeLiveFeedId.current = liveFeedSlide?.sourceId ?? null
 
   useEffect(() => {
     if (!isTauri()) return
@@ -254,11 +258,49 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     if (isTauri()) void emit('bibleshow-live-update', audienceSnapshot.current)
   }, [liveSlide, activeAlert])
 
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    let unlisten: (() => void) | undefined
+    listen<[string, string]>('bibleshow-live-feed-error', (event) => {
+      const [streamId, message] = event.payload
+      if (!active || activeLiveFeedId.current !== `live:${streamId}`) return
+      setPersistenceMessage(message)
+      setLiveFeedSlide(null)
+      setPreviewSlide((current) => current?.sourceId === `live:${streamId}` ? null : current)
+      setLiveSlide((current) => current?.sourceId === `live:${streamId}` ? null : current)
+    }).then((stop) => { if (active) unlisten = stop; else stop() }).catch(() => undefined)
+    return () => { active = false; unlisten?.() }
+  }, [])
+
   async function toggleAudienceWindow(visible: boolean) {
     if (!isTauri()) { setPersistenceMessage('Open BibleShow in the desktop app to use audience output.'); return }
     try {
       await invoke('set_audience_window_visible', { visible, displayIndex: selectedDisplay === '' ? null : Number(selectedDisplay) })
       setAudienceWindowOpen(visible)
+    } catch (error) { setPersistenceMessage(String(error)) }
+  }
+
+  async function connectNetworkFeed(sourceUrl: string) {
+    if (!isTauri()) { setPersistenceMessage('Open BibleShow in the desktop app to connect a network stream.'); return }
+    try {
+      const info = await invoke<LiveFeedInfo>('connect_live_feed', { sourceUrl })
+      const slide: PresentationSlide = { sourceId: `live:${info.streamId}`, title: 'Network Live Feed', subtitle: 'Connected stream', body: '', reference: 'Network Live Feed', kind: 'live', liveStreamUrl: info.streamUrl }
+      setLiveFeedSlide(slide)
+      preview(slide)
+      setPersistenceMessage('Network stream connected and staged in Preview.')
+    } catch (error) { setPersistenceMessage(String(error)) }
+  }
+
+  async function stopNetworkFeed() {
+    if (!isTauri()) return
+    const sourceId = liveFeedSlide?.sourceId
+    try {
+      await invoke('stop_live_feed')
+      setLiveFeedSlide(null)
+      if (previewSlide?.sourceId === sourceId) { setPreviewSlide(null); setPreviewPosition(null) }
+      if (liveSlide?.sourceId === sourceId) { setLiveSlide(null); setLivePosition(null) }
+      setPersistenceMessage('Network stream disconnected.')
     } catch (error) { setPersistenceMessage(String(error)) }
   }
   const [bibleSearchMode, setBibleSearchMode] = useState<'reference' | 'keyword'>('reference')
@@ -590,7 +632,8 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
               {activeFeed === 'lyrics' && <SongSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
               {activeFeed === 'media' && <MediaSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
               {activeFeed === 'presentations' && <SavedPresentationsFeed presentations={presentations} onRefresh={refreshPresentations} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} />}
-              {activeFeed !== 'bible' && activeFeed !== 'lyrics' && activeFeed !== 'media' && activeFeed !== 'presentations' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>This content feed is planned. Its item types and controls will be designed before it is implemented.</p></div>}
+              {activeFeed === 'live' && <NetworkLiveFeed onConnect={connectNetworkFeed} onStop={stopNetworkFeed} slide={liveFeedSlide} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} />}
+              {activeFeed !== 'bible' && activeFeed !== 'lyrics' && activeFeed !== 'media' && activeFeed !== 'presentations' && activeFeed !== 'live' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>This content feed is planned. Its item types and controls will be designed before it is implemented.</p></div>}
             </div>
           </section>
         </main>
@@ -645,6 +688,30 @@ function SavedPresentationsFeed({ presentations, onRefresh, onPreview, onSendLiv
       </section>
     </div>
   </div>
+}
+
+function NetworkLiveFeed({ onConnect, onStop, slide, onPreview, onSendLive }: {
+  onConnect: (url: string) => Promise<void>
+  onStop: () => Promise<void>
+  slide: PresentationSlide | null
+  onPreview: (slide: PresentationSlide) => void
+  onSendLive: (slide: PresentationSlide) => void
+}) {
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [connecting, setConnecting] = useState(false)
+  const connected = Boolean(slide?.liveStreamUrl)
+  const activeSlide = slide?.liveStreamUrl ? slide : null
+
+  return <section className="network-live-feed source-browser">
+    <header className="media-feed-toolbar"><div><strong>Network Live Feed</strong><span>Connect an RTSP / RTSPS video source; address is kept in memory only.</span></div><span className={`network-live-status${connected ? ' connected' : ''}`}>{connected ? 'CONNECTED' : connecting ? 'CONNECTING' : 'DISCONNECTED'}</span></header>
+    <form className="network-live-connect" onSubmit={(event) => { event.preventDefault(); setConnecting(true); void onConnect(sourceUrl.trim()).finally(() => setConnecting(false)) }}>
+      <label htmlFor="live-feed-url">RTSP stream address</label>
+      <input id="live-feed-url" type="password" autoComplete="off" spellCheck={false} placeholder="rtsp://camera.local:554/stream" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} disabled={connected || connecting} />
+      <small>Address is hidden and is not saved in shows or project exports. User name and password can be included in the address.</small>
+      <div><button type="submit" className="save-presentation-button" disabled={connected || connecting || !sourceUrl.trim()}>{connecting ? 'Connecting…' : 'Connect and Preview'}</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Disconnect</button></div>
+    </form>
+    {activeSlide?.liveStreamUrl ? <div className="network-live-preview"><img src={activeSlide.liveStreamUrl} alt="Live network stream preview" /><div><button onClick={() => onPreview(activeSlide)}>Stage in Preview</button><button className="save-presentation-button" onClick={() => onSendLive(activeSlide)}>Send Live</button></div></div> : <p className="network-live-empty">Connect a stream to see its live picture here. Only one network source can be active at a time.</p>}
+  </section>
 }
 
 function MonitorPanel({ type, slide, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
@@ -883,6 +950,7 @@ function SlideScreen({ slide, emptyLabel }: { slide: PresentationSlide | null; e
   if (!slide) return <div className="operator-screen is-empty"><div><Icon name="screen" size={23} /><span>{emptyLabel}</span></div></div>
   if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /><strong>{slide.reference}</strong></article>
   if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><video src={convertFileSrc(slide.mediaPath)} autoPlay loop muted playsInline /><strong>{slide.reference}</strong></article>
+  if (slide.kind === 'live' && slide.liveStreamUrl) return <article className="operator-screen video-screen"><img src={slide.liveStreamUrl} alt="Live network feed" /></article>
   return <article className={`operator-screen ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{slide.subtitle}</span><p>{slide.body}</p><strong>{slide.reference}</strong></article>
 }
 
@@ -901,7 +969,7 @@ export function AudienceWindow() {
   }, [])
 
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><video src={convertFileSrc(snapshot.slide.mediaPath)} autoPlay loop muted playsInline /></article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><video src={convertFileSrc(snapshot.slide.mediaPath)} autoPlay loop muted playsInline /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide"><img src={snapshot.slide.liveStreamUrl} alt="" /></article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
   </main>
 }

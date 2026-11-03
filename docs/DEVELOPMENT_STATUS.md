@@ -1,7 +1,7 @@
 # BIBLESHOW — DEVELOPMENT STATUS
 
 **Document version:** 1.0
-**Last updated:** 2 November 2026
+**Last updated:** 3 November 2026
 **Project status:** GitHub baseline established; initial shell and local KJV/lyrics importer implemented; starter content package prepared.
 
 ## 1. Current Development Environment
@@ -203,7 +203,7 @@ The next development sequence is:
 
 1. Verify keyword results-only browsing, passage staging, the unsaved-show prompt, and project import/export in the Tauri app.
 2. Exercise local project save/load/delete and fullscreen audience output reopening on available displays in the Tauri app.
-3. Implement the network Live Feed from `docs/LIVE_FEED_DESIGN.md`: RTSP receive/display first, then NDI® discovery/receive after SDK distribution review.
+3. Complete desktop review of the RTSP Live Feed slice and define cross-platform GStreamer packaging for the Windows target; then add NDI® discovery/receive after SDK distribution review.
 4. Review KJV/song rights for target release markets before bundling content in a public build; review the 700 incomplete songs when verified lyric sources become available.
 
 Do not jump ahead to advanced AI or cloud functionality.
@@ -221,4 +221,12 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Review the video and saved Presentations feed in the Tauri desktop app. Then implement Live Feed using the native backend and shared Preview/audience output described in `docs/LIVE_FEED_DESIGN.md`; the current host lacks the GStreamer/NDI development runtimes needed to build that stage.
+**Current restart point:** Build and launch the desktop app to review RTSP connect/preview/Live/disconnect against a reachable camera or stream. GStreamer was installed on this Ubuntu VM for development; Windows GStreamer runtime packaging is still unresolved. Then continue NDI design and source discovery.
+
+### 9. Current session — RTSP Live Feed
+
+- Added a native GStreamer RTSP/RTSPS receiver with TCP transport, JPEG decoding, an ephemeral tokenized localhost MJPEG stream shared by operator Preview and audience output, and explicit connect/stop/error handling.
+- Added a Live Feed URL control; the address is masked and held only in memory, never persisted or exported. One source is supported at a time; network feeds are not saved into show sequences yet.
+- Installed Ubuntu GStreamer development libraries and the tools/base/good/libav plugins on the VM. Runtime and Windows packaging requirements remain to be resolved.
+- Frontend lint, TypeScript, production build, Rust `cargo check`, GStreamer plugin availability checks, JSON validation, and `git diff --check` passed. Rust check used reduced debug output to fit the temporary build quota.
+- End-to-end playback against a real camera was not verified because no RTSP source was available. Windows GStreamer runtime packaging remains unresolved.

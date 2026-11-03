@@ -1,3 +1,5 @@
+mod live_feed;
+
 use roxmltree::{Document, Node};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -596,6 +598,16 @@ fn get_available_displays(app: tauri::AppHandle) -> Result<Vec<DisplaySummary>, 
 }
 
 #[tauri::command]
+fn connect_live_feed(app: tauri::AppHandle, state: tauri::State<'_, live_feed::LiveFeedState>, source_url: String) -> Result<live_feed::LiveFeedInfo, String> {
+    live_feed::connect(&app, &state, source_url)
+}
+
+#[tauri::command]
+fn stop_live_feed(state: tauri::State<'_, live_feed::LiveFeedState>) {
+    live_feed::stop(&state);
+}
+
+#[tauri::command]
 fn set_audience_window_visible(app: tauri::AppHandle, visible: bool, display_index: Option<usize>) -> Result<(), String> {
     let window = app
         .get_webview_window("audience")
@@ -1180,6 +1192,7 @@ fn db_error(error: rusqlite::Error) -> String {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            app.manage(live_feed::LiveFeedState::default());
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -1198,6 +1211,8 @@ pub fn run() {
             import_media_file,
             get_media_files,
             get_available_displays,
+            connect_live_feed,
+            stop_live_feed,
             set_audience_window_visible,
             get_song_library,
             get_song_detail,
