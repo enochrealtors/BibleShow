@@ -8,6 +8,8 @@ use std::{fs, io::Read, path::PathBuf};
 use tauri::{
     Manager,
     ipc::{InvokeBody, Request},
+    webview::{PermissionKind, PermissionResponse, WebviewWindowBuilder},
+    WebviewUrl,
 };
 use zip::ZipArchive;
 
@@ -1193,6 +1195,23 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             app.manage(live_feed::LiveFeedState::default());
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                .title("BibleShow")
+                .inner_size(800.0, 600.0)
+                .resizable(true)
+                .on_permission_request(|window, kind| match kind {
+                    PermissionKind::Camera if window.label() == "main" => PermissionResponse::Allow,
+                    _ => PermissionResponse::Default,
+                })
+                .build()?;
+            WebviewWindowBuilder::new(app, "audience", WebviewUrl::App("index.html?audience=1".into()))
+                .title("BibleShow — Audience Output")
+                .inner_size(1280.0, 720.0)
+                .min_inner_size(640.0, 360.0)
+                .resizable(true)
+                .visible(false)
+                .on_permission_request(|_, _| PermissionResponse::Deny)
+                .build()?;
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

@@ -10,27 +10,6 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "windows": [
-      {
-        "title": "BibleShow",
-        "width": 800,
-        "height": 600,
-        "resizable": true,
-        "fullscreen": false
-      },
-      {
-        "label": "audience",
-        "title": "BibleShow — Audience Output",
-        "url": "index.html?audience=1",
-        "width": 1280,
-        "height": 720,
-        "minWidth": 640,
-        "minHeight": 360,
-        "resizable": true,
-        "fullscreen": false,
-        "visible": false
-      }
-    ],
     "security": {
       "csp": null,
       "assetProtocol": {

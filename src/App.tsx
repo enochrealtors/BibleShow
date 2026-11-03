@@ -30,7 +30,7 @@ type ChapterData = { book_number: number; name: string; chapter_number: number; 
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
-type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; liveStreamUrl?: string }
+type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; liveStreamUrl?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' }
 type QueuedSlide = PresentationSlide & { queueId: string }
 type MediaFile = { id: string; filename: string; mediaType: 'image' | 'video'; mimeType: string; localPath: string; fileSize: number }
 type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null }
@@ -39,6 +39,7 @@ type PendingProjectAction = { kind: 'leave' } | { kind: 'new' } | { kind: 'open'
 type PresentationSummary = { id: number; title: string; updatedAt: string; slideCount: number }
 type SavedPresentation = { id: number; title: string; slides: PresentationSlide[] }
 type LiveFeedInfo = { streamId: string; streamUrl: string }
+type CameraSignal = { sourceId: string; sender?: 'operator' | 'audience'; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }
 type PresentationFeed = 'bible' | 'lyrics' | 'media' | 'presentations' | 'live' | 'url' | 'themes' | 'functions' | 'overlays'
 const presentationFeedLabels: Record<PresentationFeed, string> = {
   bible: 'Bible', lyrics: 'Lyrics', media: 'Videos & Images', presentations: 'Presentations', live: 'Live Feed', url: 'URL Media', themes: 'Themes', functions: 'Functions', overlays: 'Overlays',
@@ -208,6 +209,7 @@ function HomePage({ onNavigate, library, importState, onImport }: { onNavigate: 
 function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [activeFeed, setActiveFeed] = useState<PresentationFeed>('bible')
   const [liveFeedSlide, setLiveFeedSlide] = useState<PresentationSlide | null>(null)
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [previewSlide, setPreviewSlide] = useState<PresentationSlide | null>(null)
   const [liveSlide, setLiveSlide] = useState<PresentationSlide | null>(null)
   const [sequence, setSequence] = useState<QueuedSlide[]>([])
@@ -232,6 +234,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const hasUnsavedProjectChanges = projectSnapshot(presentationTitle, sequence) !== savedProjectSnapshot
   const audienceSnapshot = useRef<AudienceSnapshot>({ slide: null, alert: null })
   const activeLiveFeedId = useRef<string | null>(null)
+  const cameraPeer = useRef<RTCPeerConnection | null>(null)
   audienceSnapshot.current = { slide: liveSlide, alert: activeAlert }
   activeLiveFeedId.current = liveFeedSlide?.sourceId ?? null
 
@@ -245,6 +248,39 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     }).catch((error) => setPersistenceMessage(String(error)))
     return () => { cancelled = true; unlisten?.() }
   }, [])
+
+  useEffect(() => {
+    if (!isTauri() || !cameraStream) return
+    let active = true
+    let unlistenRequest: (() => void) | undefined
+    let unlistenAnswer: (() => void) | undefined
+    let unlistenIce: (() => void) | undefined
+    let peer: RTCPeerConnection | null = null
+    const candidates: RTCIceCandidateInit[] = []
+    const closePeer = () => { peer?.close(); peer = null; cameraPeer.current = null }
+    const startRelay = async (sourceId: string) => {
+      if (!active || sourceId !== cameraStream.id || peer) return
+      peer = new RTCPeerConnection()
+      cameraPeer.current = peer
+      cameraStream.getTracks().forEach((track) => peer?.addTrack(track, cameraStream))
+      peer.onicecandidate = (event) => { if (event.candidate) void emit('bibleshow-camera-ice', { sourceId, sender: 'operator', candidate: event.candidate.toJSON() } satisfies CameraSignal) }
+      const offer = await peer.createOffer()
+      await peer.setLocalDescription(offer)
+      await emit('bibleshow-camera-offer', { sourceId, sender: 'operator', description: peer.localDescription ?? offer } satisfies CameraSignal)
+    }
+    void listen<CameraSignal>('bibleshow-camera-request', (event) => { void startRelay(event.payload.sourceId).catch(() => closePeer()) }).then((stop) => { if (active) unlistenRequest = stop; else stop() })
+    void listen<CameraSignal>('bibleshow-camera-answer', async (event) => {
+      if (!peer || event.payload.sender !== 'audience' || event.payload.sourceId !== cameraStream.id || !event.payload.description) return
+      await peer.setRemoteDescription(event.payload.description)
+      while (candidates.length) await peer.addIceCandidate(candidates.shift()!)
+    }).then((stop) => { if (active) unlistenAnswer = stop; else stop() })
+    void listen<CameraSignal>('bibleshow-camera-ice', async (event) => {
+      if (!peer || event.payload.sender !== 'audience' || event.payload.sourceId !== cameraStream.id || !event.payload.candidate) return
+      if (peer.remoteDescription) await peer.addIceCandidate(event.payload.candidate)
+      else candidates.push(event.payload.candidate)
+    }).then((stop) => { if (active) unlistenIce = stop; else stop() })
+    return () => { active = false; unlistenRequest?.(); unlistenAnswer?.(); unlistenIce?.(); closePeer() }
+  }, [cameraStream])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -285,18 +321,37 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     if (!isTauri()) { setPersistenceMessage('Open BibleShow in the desktop app to connect a network stream.'); return }
     try {
       const info = await invoke<LiveFeedInfo>('connect_live_feed', { sourceUrl })
-      const slide: PresentationSlide = { sourceId: `live:${info.streamId}`, title: 'Network Live Feed', subtitle: 'Connected stream', body: '', reference: 'Network Live Feed', kind: 'live', liveStreamUrl: info.streamUrl }
+      const slide: PresentationSlide = { sourceId: `live:${info.streamId}`, title: 'RTSP Live Feed', subtitle: 'Connected stream', body: '', reference: 'RTSP Live Feed', kind: 'live', liveStreamUrl: info.streamUrl, liveStreamKind: 'mjpeg' }
       setLiveFeedSlide(slide)
       preview(slide)
       setPersistenceMessage('Network stream connected and staged in Preview.')
     } catch (error) { setPersistenceMessage(String(error)) }
   }
 
+  function connectCamera(stream: MediaStream, label: string) {
+    setCameraStream((previous) => { previous?.getTracks().forEach((track) => track.stop()); return stream })
+    const slide: PresentationSlide = { sourceId: stream.id, title: label, subtitle: 'Connected camera', body: '', reference: label, kind: 'live', liveStreamKind: 'camera' }
+    setLiveFeedSlide(slide)
+    preview(slide)
+    setPersistenceMessage('Camera connected and staged in Preview. Send it Live when ready.')
+  }
+
+  function connectStreamUrl(sourceUrl: string, streamKind: 'video' | 'mjpeg') {
+    const slide: PresentationSlide = { sourceId: `url:${Date.now()}`, title: 'Direct Stream', subtitle: 'Browser-playable stream', body: '', reference: 'Direct Stream', kind: 'live', liveStreamUrl: sourceUrl, liveStreamKind: streamKind }
+    setLiveFeedSlide(slide)
+    preview(slide)
+    setPersistenceMessage('Stream URL staged in Preview. Confirm playback before sending it Live.')
+  }
+
   async function stopNetworkFeed() {
     if (!isTauri()) return
     const sourceId = liveFeedSlide?.sourceId
     try {
-      await invoke('stop_live_feed')
+      if (isTauri()) await invoke('stop_live_feed')
+      cameraPeer.current?.close()
+      cameraPeer.current = null
+      cameraStream?.getTracks().forEach((track) => track.stop())
+      setCameraStream(null)
       setLiveFeedSlide(null)
       if (previewSlide?.sourceId === sourceId) { setPreviewSlide(null); setPreviewPosition(null) }
       if (liveSlide?.sourceId === sourceId) { setLiveSlide(null); setLivePosition(null) }
@@ -609,8 +664,8 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
         <main className="operator-center">
           <section className="operator-display-area">
             <div className="operator-monitors">
-              <MonitorPanel type="preview" slide={previewSlide} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} canNavigate={sequence.length > 0} onAction={() => previewSlide && sendLive(previewSlide, previewPosition)} />
-              <MonitorPanel type="live" slide={liveDisplayOpen ? liveSlide : null} alert={liveDisplayOpen ? activeAlert : null} onPrevious={() => moveLive(-1)} onNext={() => moveLive(1)} canNavigate={sequence.length > 0} onAction={() => moveLive(1)} emptyLabel={liveDisplayOpen ? 'Nothing live yet' : 'Live display is closed'} />
+              <MonitorPanel type="preview" slide={previewSlide} cameraStream={cameraStream} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} canNavigate={sequence.length > 0} onAction={() => previewSlide && sendLive(previewSlide, previewPosition)} />
+              <MonitorPanel type="live" slide={liveDisplayOpen ? liveSlide : null} cameraStream={cameraStream} alert={liveDisplayOpen ? activeAlert : null} onPrevious={() => moveLive(-1)} onNext={() => moveLive(1)} canNavigate={sequence.length > 0} onAction={() => moveLive(1)} emptyLabel={liveDisplayOpen ? 'Nothing live yet' : 'Live display is closed'} />
             </div>
             <form className="operator-status bible-search-bar" onSubmit={(event) => { event.preventDefault(); if (bibleSearchQuery.trim()) { setActiveFeed('bible'); setBibleSearchRequest({ mode: bibleSearchMode, query: bibleSearchQuery.trim(), id: Date.now() }) } }}>
               <Icon name="search" size={17} />
@@ -632,7 +687,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
               {activeFeed === 'lyrics' && <SongSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
               {activeFeed === 'media' && <MediaSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
               {activeFeed === 'presentations' && <SavedPresentationsFeed presentations={presentations} onRefresh={refreshPresentations} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} />}
-              {activeFeed === 'live' && <NetworkLiveFeed onConnect={connectNetworkFeed} onStop={stopNetworkFeed} slide={liveFeedSlide} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} />}
+              {activeFeed === 'live' && <NetworkLiveFeed onConnect={connectNetworkFeed} onConnectCamera={connectCamera} onConnectUrl={connectStreamUrl} onStop={stopNetworkFeed} slide={liveFeedSlide} cameraStream={cameraStream} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} />}
               {activeFeed !== 'bible' && activeFeed !== 'lyrics' && activeFeed !== 'media' && activeFeed !== 'presentations' && activeFeed !== 'live' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>This content feed is planned. Its item types and controls will be designed before it is implemented.</p></div>}
             </div>
           </section>
@@ -690,36 +745,78 @@ function SavedPresentationsFeed({ presentations, onRefresh, onPreview, onSendLiv
   </div>
 }
 
-function NetworkLiveFeed({ onConnect, onStop, slide, onPreview, onSendLive }: {
+function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, slide, cameraStream, onPreview, onSendLive }: {
   onConnect: (url: string) => Promise<void>
+  onConnectCamera: (stream: MediaStream, label: string) => void
+  onConnectUrl: (url: string, kind: 'video' | 'mjpeg') => void
   onStop: () => Promise<void>
   slide: PresentationSlide | null
+  cameraStream: MediaStream | null
   onPreview: (slide: PresentationSlide) => void
   onSendLive: (slide: PresentationSlide) => void
 }) {
   const [sourceUrl, setSourceUrl] = useState('')
   const [connecting, setConnecting] = useState(false)
-  const connected = Boolean(slide?.liveStreamUrl)
-  const activeSlide = slide?.liveStreamUrl ? slide : null
+  const [sourceMode, setSourceMode] = useState<'camera' | 'url' | 'rtsp'>('camera')
+  const [streamKind, setStreamKind] = useState<'video' | 'mjpeg'>('video')
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const [selectedDevice, setSelectedDevice] = useState('')
+  const [feedError, setFeedError] = useState('')
+  const localVideo = useRef<HTMLVideoElement>(null)
+  const connected = Boolean(slide && (slide.liveStreamKind === 'camera' ? cameraStream : slide.liveStreamUrl))
+  const activeSlide = connected ? slide : null
+
+  useEffect(() => {
+    if (localVideo.current) localVideo.current.srcObject = cameraStream
+  }, [cameraStream])
+
+  async function startCamera(deviceId?: string) {
+    setConnecting(true)
+    setFeedError('')
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera capture is unavailable in this app runtime.')
+      const stream = await navigator.mediaDevices.getUserMedia({ video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } : { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false })
+      const cameras = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'videoinput')
+      setDevices(cameras)
+      const activeDevice = stream.getVideoTracks()[0]?.getSettings().deviceId ?? cameras[0]?.deviceId ?? ''
+      setSelectedDevice(activeDevice)
+      onConnectCamera(stream, cameras.find((device) => device.deviceId === activeDevice)?.label || 'Camera')
+    } catch (error) {
+      setFeedError(error instanceof Error ? error.message : String(error))
+    } finally { setConnecting(false) }
+  }
+
+  function connectUrl(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    try {
+      const url = new URL(sourceUrl.trim())
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Use a direct HTTP or HTTPS stream endpoint.')
+      onConnectUrl(url.toString(), streamKind)
+      setFeedError('')
+    } catch (error) { setFeedError(error instanceof Error ? error.message : String(error)) }
+  }
 
   return <section className="network-live-feed source-browser">
-    <header className="media-feed-toolbar"><div><strong>Network Live Feed</strong><span>Connect an RTSP / RTSPS video source; address is kept in memory only.</span></div><span className={`network-live-status${connected ? ' connected' : ''}`}>{connected ? 'CONNECTED' : connecting ? 'CONNECTING' : 'DISCONNECTED'}</span></header>
-    <form className="network-live-connect" onSubmit={(event) => { event.preventDefault(); setConnecting(true); void onConnect(sourceUrl.trim()).finally(() => setConnecting(false)) }}>
-      <label htmlFor="live-feed-url">RTSP stream address</label>
-      <input id="live-feed-url" type="password" autoComplete="off" spellCheck={false} placeholder="rtsp://camera.local:554/stream" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} disabled={connected || connecting} />
-      <small>Address is hidden and is not saved in shows or project exports. User name and password can be included in the address.</small>
-      <div><button type="submit" className="save-presentation-button" disabled={connected || connecting || !sourceUrl.trim()}>{connecting ? 'Connecting…' : 'Connect and Preview'}</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Disconnect</button></div>
-    </form>
-    {activeSlide?.liveStreamUrl ? <div className="network-live-preview"><img src={activeSlide.liveStreamUrl} alt="Live network stream preview" /><div><button onClick={() => onPreview(activeSlide)}>Stage in Preview</button><button className="save-presentation-button" onClick={() => onSendLive(activeSlide)}>Send Live</button></div></div> : <p className="network-live-empty">Connect a stream to see its live picture here. Only one network source can be active at a time.</p>}
+    <header className="media-feed-toolbar"><div><strong>Live Feed</strong><span>Connect a camera or a direct stream endpoint. Sources are session-only.</span></div><span className={`network-live-status${connected ? ' connected' : ''}`}>{connected ? 'CONNECTED' : connecting ? 'CONNECTING' : 'DISCONNECTED'}</span></header>
+    <div className="network-live-connect">
+      <label htmlFor="live-source-mode">Source type</label>
+      <select id="live-source-mode" value={sourceMode} onChange={(event) => setSourceMode(event.target.value as typeof sourceMode)} disabled={connected}><option value="camera">Connected camera / webcam</option><option value="url">Direct HTTP(S) stream URL</option><option value="rtsp">RTSP / RTSPS (GStreamer)</option></select>
+      {sourceMode === 'camera' && <><label htmlFor="live-camera-device">Camera</label><select id="live-camera-device" value={selectedDevice} onChange={(event) => { setSelectedDevice(event.target.value); void startCamera(event.target.value) }} disabled={connected || connecting || !devices.length}><option value="">Default camera</option>{devices.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera ${index + 1}`}</option>)}</select><small>Camera permission is requested by the system the first time you start capture. The same feed is relayed to audience output when sent Live.</small><div><button type="button" className="save-presentation-button" onClick={() => void startCamera()} disabled={connected || connecting}>{connecting ? 'Starting camera…' : 'Start camera and Preview'}</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Stop source</button></div></>}
+      {sourceMode === 'url' && <form onSubmit={connectUrl}><label htmlFor="live-feed-url">Direct stream address</label><input id="live-feed-url" type="password" autoComplete="off" spellCheck={false} placeholder="https://camera.local/live.m3u8" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} disabled={connected || connecting} /><label htmlFor="live-stream-kind">Stream format</label><select id="live-stream-kind" value={streamKind} onChange={(event) => setStreamKind(event.target.value as typeof streamKind)} disabled={connected}><option value="video">Video / HLS (WebView supported formats)</option><option value="mjpeg">MJPEG</option></select><small>Use an HTTP(S) URL that points directly to a playable stream, not a watch page. HLS and codecs vary by Windows and Linux WebView. Credentials in the URL are kept in memory only.</small><div><button type="submit" className="save-presentation-button" disabled={connected || !sourceUrl.trim()}>Connect and Preview</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Stop source</button></div></form>}
+      {sourceMode === 'rtsp' && <><label htmlFor="live-feed-rtsp-url">RTSP / RTSPS address</label><input id="live-feed-rtsp-url" type="password" autoComplete="off" spellCheck={false} placeholder="rtsp://camera.local:554/stream" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} disabled={connected || connecting} /><small>This experimental receiver depends on GStreamer installed on this computer.</small><div><button type="button" className="save-presentation-button" onClick={() => { setConnecting(true); void onConnect(sourceUrl.trim()).finally(() => setConnecting(false)) }} disabled={connected || connecting || !sourceUrl.trim()}>{connecting ? 'Connecting…' : 'Connect and Preview'}</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Stop source</button></div></>}
+    </div>
+    {feedError && <p className="source-error" role="alert">{feedError}</p>}
+    {activeSlide && <div className="network-live-preview">{activeSlide.liveStreamKind === 'camera' ? <video ref={localVideo} autoPlay muted playsInline /> : activeSlide.liveStreamKind === 'mjpeg' ? <img src={activeSlide.liveStreamUrl} alt="Live MJPEG feed" onError={() => setFeedError('The MJPEG endpoint could not be loaded. Check the URL and camera network settings.')} /> : <video src={activeSlide.liveStreamUrl} autoPlay muted playsInline onError={() => setFeedError('This stream could not play in the current WebView. Check the URL, format and codec support.')} />}<div><button onClick={() => onPreview(activeSlide)}>Stage in Preview</button><button className="save-presentation-button" onClick={() => onSendLive(activeSlide)}>Send Live</button><button onClick={() => void onStop()}>Stop source</button></div></div>}
+    {!activeSlide && <p className="network-live-empty">Choose a camera or direct stream source. One Live Feed source can be active at a time.</p>}
   </section>
 }
 
-function MonitorPanel({ type, slide, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
+function MonitorPanel({ type, slide, cameraStream, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; cameraStream: MediaStream | null; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
   const isPreview = type === 'preview'
   return (
     <section className={`monitor-panel ${isPreview ? 'monitor-preview' : 'monitor-live'}`}>
       <header className="monitor-heading"><div><span className={`monitor-light ${isPreview ? 'is-preview' : slide ? 'is-live' : ''}`} /><strong>{isPreview ? 'PREVIEW' : 'LIVE'}</strong></div><small>{isPreview ? 'Operator selection' : 'Local Live monitor'}</small></header>
-      <div className="monitor-screen-wrap"><SlideScreen slide={slide} emptyLabel={emptyLabel ?? (isPreview ? 'Choose content to preview' : 'Nothing live yet')} />{!isPreview && alert && <div className={`display-alert ${alert.mode}`}><span>{alert.text}</span></div>}</div>
+      <div className="monitor-screen-wrap"><SlideScreen slide={slide} cameraStream={cameraStream} emptyLabel={emptyLabel ?? (isPreview ? 'Choose content to preview' : 'Nothing live yet')} />{!isPreview && alert && <div className={`display-alert ${alert.mode}`}><span>{alert.text}</span></div>}</div>
       <footer className="monitor-controls">
         <button onClick={onPrevious} disabled={!canNavigate} aria-label={`Previous ${type} page`}>‹</button>
         {isPreview && <button className="take-live-button" onClick={onAction} disabled={!slide}>Take Live</button>}
@@ -946,16 +1043,20 @@ function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { 
   </div>
 }
 
-function SlideScreen({ slide, emptyLabel }: { slide: PresentationSlide | null; emptyLabel: string }) {
+function SlideScreen({ slide, cameraStream, emptyLabel }: { slide: PresentationSlide | null; cameraStream: MediaStream | null; emptyLabel: string }) {
   if (!slide) return <div className="operator-screen is-empty"><div><Icon name="screen" size={23} /><span>{emptyLabel}</span></div></div>
   if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /><strong>{slide.reference}</strong></article>
   if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><video src={convertFileSrc(slide.mediaPath)} autoPlay loop muted playsInline /><strong>{slide.reference}</strong></article>
-  if (slide.kind === 'live' && slide.liveStreamUrl) return <article className="operator-screen video-screen"><img src={slide.liveStreamUrl} alt="Live network feed" /></article>
+  if (slide.kind === 'live' && slide.liveStreamKind === 'camera') return <article className="operator-screen video-screen"><LiveVideo stream={cameraStream} label="Live camera feed" /></article>
+  if (slide.kind === 'live' && slide.liveStreamUrl) return <article className="operator-screen video-screen">{slide.liveStreamKind === 'mjpeg' ? <img src={slide.liveStreamUrl} alt="Live MJPEG feed" /> : <video src={slide.liveStreamUrl} autoPlay muted playsInline />}</article>
   return <article className={`operator-screen ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{slide.subtitle}</span><p>{slide.body}</p><strong>{slide.reference}</strong></article>
 }
 
 export function AudienceWindow() {
   const [snapshot, setSnapshot] = useState<AudienceSnapshot>({ slide: null, alert: null })
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const audiencePeer = useRef<RTCPeerConnection | null>(null)
+  const cameraSourceId = snapshot.slide?.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? snapshot.slide.sourceId : null
 
   useEffect(() => {
     if (!isTauri()) return
@@ -968,10 +1069,55 @@ export function AudienceWindow() {
     return () => { cancelled = true; unlisten?.() }
   }, [])
 
+  useEffect(() => {
+    if (!isTauri() || !cameraSourceId) {
+      audiencePeer.current?.close()
+      audiencePeer.current = null
+      return
+    }
+    let active = true
+    let unlistenOffer: (() => void) | undefined
+    let unlistenIce: (() => void) | undefined
+    const pendingCandidates: RTCIceCandidateInit[] = []
+    let peer: RTCPeerConnection | null = null
+    const stopPeer = () => { peer?.close(); peer = null; audiencePeer.current = null; setCameraStream(null) }
+    const offerReady = listen<CameraSignal>('bibleshow-camera-offer', async (event) => {
+      if (!active || event.payload.sender !== 'operator' || event.payload.sourceId !== cameraSourceId || !event.payload.description) return
+      stopPeer()
+      peer = new RTCPeerConnection()
+      audiencePeer.current = peer
+      peer.ontrack = (trackEvent) => { if (active) setCameraStream(trackEvent.streams[0] ?? new MediaStream([trackEvent.track])) }
+      peer.onicecandidate = (candidateEvent) => { if (candidateEvent.candidate) void emit('bibleshow-camera-ice', { sourceId: cameraSourceId, sender: 'audience', candidate: candidateEvent.candidate.toJSON() } satisfies CameraSignal) }
+      await peer.setRemoteDescription(event.payload.description)
+      while (pendingCandidates.length) await peer.addIceCandidate(pendingCandidates.shift()!)
+      const answer = await peer.createAnswer()
+      await peer.setLocalDescription(answer)
+      await emit('bibleshow-camera-answer', { sourceId: cameraSourceId, sender: 'audience', description: peer.localDescription ?? answer } satisfies CameraSignal)
+    })
+    const iceReady = listen<CameraSignal>('bibleshow-camera-ice', async (event) => {
+      if (!active || event.payload.sender !== 'operator' || event.payload.sourceId !== cameraSourceId || !event.payload.candidate) return
+      if (peer?.remoteDescription) await peer.addIceCandidate(event.payload.candidate)
+      else pendingCandidates.push(event.payload.candidate)
+    })
+    void Promise.all([offerReady, iceReady]).then(([stopOffer, stopIce]) => {
+      if (!active) { stopOffer(); stopIce(); return }
+      unlistenOffer = stopOffer
+      unlistenIce = stopIce
+      return emit('bibleshow-camera-request', { sourceId: cameraSourceId } satisfies CameraSignal)
+    }).catch(() => setCameraStream(null))
+    return () => { active = false; unlistenOffer?.(); unlistenIce?.(); stopPeer() }
+  }, [cameraSourceId])
+
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><video src={convertFileSrc(snapshot.slide.mediaPath)} autoPlay loop muted playsInline /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide"><img src={snapshot.slide.liveStreamUrl} alt="" /></article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><video src={convertFileSrc(snapshot.slide.mediaPath)} autoPlay loop muted playsInline /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
   </main>
+}
+
+function LiveVideo({ stream, label }: { stream: MediaStream | null; label: string }) {
+  const video = useRef<HTMLVideoElement>(null)
+  useEffect(() => { if (video.current) video.current.srcObject = stream }, [stream])
+  return <video ref={video} autoPlay muted playsInline aria-label={label} />
 }
 
 export default App

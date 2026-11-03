@@ -1,6 +1,6 @@
 # Live Feed Design
 
-**Status:** RTSP receive/Preview/Live first implementation slice is in progress; NDI remains planned.
+**Status:** Direct camera/webcam capture and HTTP(S) MJPEG/video endpoints are implemented in the Live Feed feed. Camera output uses an operator-to-audience WebRTC relay. Runtime compatibility and actual device playback still need desktop verification. RTSP/GStreamer remains an optional experimental path.
 **Last updated:** 3 November 2026
 
 ## Goal
@@ -9,27 +9,35 @@ Let an operator receive a live network video source, inspect it in Preview, and 
 
 ## Proposed operator flow
 
-1. Choose **Add network source** in the Live Feed tab.
-2. Enter an RTSP/RTSPS URL or select a discovered NDI® source.
+1. Choose **Camera / capture device** or **Stream URL** in the Live Feed tab.
+2. For a camera, grant camera access and choose an available device. For a URL, enter a direct video stream endpoint.
 3. Connect and show connection state and a live Preview.
 4. Single-select to stage in Preview; double-click or Enter sends the feed Live, matching the existing operator controls.
-5. Stop the source from the feed or display controls. In a future version, a saved show may keep a source reference, not a recording.
+5. Stop the source from the feed or display controls. Network and camera sources remain session-only until credential-safe project persistence is designed.
 
 Keep source credentials out of project exports and visible labels. Define a secure credential-storage approach before saving URLs that include credentials.
 
 ## Implementation stages
 
-### 1. RTSP receive and display
+### 1. Direct camera / capture device — implemented; desktop verification pending
 
-- Use a native GStreamer RTSP pipeline; its `rtspsrc` element receives RTSP network media.
-- Current implementation: one active RTSP/RTSPS source, TCP transport, a short GStreamer jitter buffer, JPEG frame decoding, and one token-protected loopback MJPEG endpoint shared by Preview and the audience window.
-- The stream URL is entered in a password-style field and held only in process memory. It is not logged, exported, placed in the presentation sequence, or persisted. Embedded URL credentials are supported for the current connection only.
-- A source must produce its first frame within eight seconds. On disconnect/error, the source is stopped and its Preview/Live slide is cleared. Reconnect is a manual operator action.
-- Adding network sources to saved shows is deferred until a credential-safe persistence model is designed. NDI discovery and receive remain a separate follow-up.
-- Do not rely on an HTML `<video>` element to open `rtsp://` URLs directly; browser support is not native in most browsers.
-- Ubuntu development requires GStreamer 1.28 development headers, GStreamer base/good plugins, and the libav plugin for common H.264 streams. Install with `sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev`. The application binary dynamically links GStreamer; Linux runtime packages must be installed. Windows runtime bundling and packaging still need a documented installer/toolchain path before that release target can use this backend.
+- Use the browser media-device API to request a stream after the operator selects Start camera. Keep capture in the operator window and stop every track on disconnect/unmount.
+- Route the same captured stream to the separate audience window through an in-app WebRTC peer connection; do not request the camera independently from both windows.
+- Main-window camera permission is allowed by Tauri only when the user presses Start camera; the hidden audience window denies permission requests and receives the relayed stream instead.
 
-### 2. NDI® discovery and receive
+### 2. Browser-playable direct URL streams — implemented; runtime verification pending
+
+- Accept direct HTTP(S) endpoints as MJPEG image streams or browser video. HLS (`.m3u8`) is submitted as browser video and must be checked on Windows WebView2 and Ubuntu WebKitGTK; no HLS JavaScript player is bundled yet. MP4/WebM local media retains its existing path.
+- Preserve URL privacy: mask input, do not log it, and do not persist credentials or tokens in project JSON. Explain that a URL must point directly to a playable stream endpoint, not merely a webpage or a platform's watch page.
+- Use the same operator-to-audience WebRTC relay for the decoded URL stream where both windows must show one synchronized source.
+
+### 3. RTSP/RTSPS and NDI — optional native adapters
+
+- The current branch contains a GStreamer RTSP receiver with a loopback MJPEG bridge, TCP transport and a tokenized local endpoint. It compiles on this Ubuntu VM but has not been verified against a real camera. It requires GStreamer and is not part of the no-GStreamer camera/URL path.
+- Keep or remove this adapter after direct camera and browser-playable URL feeds work. Do not promise arbitrary RTSP URLs as browser-playable.
+- NDI® discovery and receive would require its SDK as a separate adapter; review current distribution requirements before implementation.
+
+### 4. NDI® discovery and receive
 
 - Add source discovery and receive through the NDI SDK as a separate backend adapter.
 - Review current SDK licensing and software distribution requirements before bundling it with BibleShow.
@@ -37,14 +45,17 @@ Keep source credentials out of project exports and visible labels. Define a secu
 
 ## Current implementation constraints
 
-- GStreamer Rust bindings are now a project dependency. This Ubuntu host has GStreamer 1.28 development libraries and the tools/base/good/libav plugins installed for development.
-- A correct Preview plus separate audience output needs a shared decoded source or relay. Sending only an RTSP URL to the audience window would create a second connection and still would not make the webview able to decode RTSP.
-- The project mirrors serializable slide state between windows; the loopback MJPEG URL is carried in that ephemeral state while the actual frame source remains a single native GStreamer pipeline.
-- The Rust build and frontend checks pass on this VM. A reachable RTSP source was not available during implementation, so end-to-end camera playback still needs desktop verification.
+- `navigator.mediaDevices.getUserMedia()` requires a secure context and explicit permission; verify device selection and OS-level access in both Tauri target platforms.
+- RTSP is not a native browser video transport. A direct camera and supported HTTP(S) stream can avoid GStreamer, but that does not make RTSP/NDI endpoints work without a native adapter or a conversion service.
+- A single camera source feeds Preview and audience output through a local WebRTC peer connection. Verify codec support, startup, stop, audience-window reopening, and reconnect behavior on Windows WebView2 and Ubuntu WebKitGTK.
+- GStreamer 1.28 development libraries and plugins remain installed on this Ubuntu VM from the experimental RTSP stage. The last compile passed; playback against a real source remains unverified.
 
 ## Reference documentation
 
 - [GStreamer `rtspsrc`](https://gstreamer.freedesktop.org/documentation/rtsp/rtspsrc.html)
 - [MDN live streaming protocols](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Audio_and_video_delivery/Live_streaming_web_audio_and_video)
+- [MDN `getUserMedia()`](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia)
+- [Tauri 2.12 webview permission hook](https://v2.tauri.app/blog/tauri-2.12/)
+- [MDN streaming audio/video and HLS support](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Streaming)
 - [NDI SDK documentation](https://docs.ndi.video/all/developing-with-ndi/sdk)
 - [NDI software distribution](https://docs.ndi.video/all/developing-with-ndi/sdk/software-distribution)

@@ -201,10 +201,10 @@ Do not change working configuration unnecessarily.
 
 The next development sequence is:
 
-1. Verify keyword results-only browsing, passage staging, the unsaved-show prompt, and project import/export in the Tauri app.
-2. Exercise local project save/load/delete and fullscreen audience output reopening on available displays in the Tauri app.
-3. Complete desktop review of the RTSP Live Feed slice and define cross-platform GStreamer packaging for the Windows target; then add NDI® discovery/receive after SDK distribution review.
-4. Review KJV/song rights for target release markets before bundling content in a public build; review the 700 incomplete songs when verified lyric sources become available.
+1. Verify Live Feed camera permission and selection, WebRTC audience relay, HTTP(S) video/HLS and MJPEG playback, and RTSP fallback on desktop. Confirm the stream stops and releases the camera cleanly.
+2. Expand the Bible and Lyrics import workflows: Bible USFM/USX, OSIS and Zefania XML; Lyrics OpenLyrics, OpenSong, OpenLP export, TXT and CSV. Include format validation, import preview, duplicate handling, metadata and transactional rollback.
+3. Revisit Videos / Images in the desktop app. MP4/WebM import and playback code already exists, but user workflow verification is still needed; fix the reported video upload gap before extending media formats.
+4. Resume broader display, rights, packaging and remaining feed work. NDI® and cross-platform GStreamer packaging remain separate optional adapter decisions.
 
 Do not jump ahead to advanced AI or cloud functionality.
 
@@ -221,7 +221,7 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Build and launch the desktop app to review RTSP connect/preview/Live/disconnect against a reachable camera or stream. GStreamer was installed on this Ubuntu VM for development; Windows GStreamer runtime packaging is still unresolved. Then continue NDI design and source discovery.
+**Current restart point:** Direct camera/webcam capture, camera device selection, an operator-to-audience WebRTC relay, direct HTTP(S) video/MJPEG sources and the existing experimental RTSP option are implemented. Run the desktop app on a machine with a camera and compatible direct endpoints; runtime behavior, especially WebView playback support, remains unverified. Then move to the requested multi-format Bible and Lyrics imports.
 
 ### 9. Current session — RTSP Live Feed
 
@@ -230,3 +230,12 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - Installed Ubuntu GStreamer development libraries and the tools/base/good/libav plugins on the VM. Runtime and Windows packaging requirements remain to be resolved.
 - Frontend lint, TypeScript, production build, Rust `cargo check`, GStreamer plugin availability checks, JSON validation, and `git diff --check` passed. Rust check used reduced debug output to fit the temporary build quota.
 - End-to-end playback against a real camera was not verified because no RTSP source was available. Windows GStreamer runtime packaging remains unresolved.
+
+### 10. Current session — camera and direct URL Live Feed
+
+- Added connected camera/webcam capture to the Live Feed panel with device selection after initial permission and explicit user-initiated start/stop.
+- Added a single-source WebRTC relay from the operator window to audience output when a camera is sent Live. The audience window does not request a second camera capture.
+- Added direct HTTP(S) video/HLS and MJPEG endpoints. URLs remain session-only and masked; arbitrary watch pages and RTSP are not treated as browser-playable sources.
+- Moved Tauri window creation into Rust so the main webview can allow camera permission requests after the operator starts capture, while the audience webview denies camera permission. Permission behavior and playback still require desktop review.
+- Kept the existing GStreamer RTSP receiver as an optional experimental choice. Updated the Live Feed design document to reflect actual code and platform verification limits.
+- Validation: `npm run build`, `npm run lint`, Rust `cargo check`, Tauri config JSON parsing, and `git diff --check` passed. Real camera capture, WebRTC audience relay, direct URL decoding, and desktop visual review still need runtime verification.

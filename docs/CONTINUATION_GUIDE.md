@@ -35,14 +35,18 @@ You are continuing development of **BibleShow**, an offline-first church present
 - Saved Presentations feed can browse projects, Preview or send individual slides Live, add one slide, or add all slides to the current show.
 - SQLite schema is currently version 5.
 
-### Next development stage: network Live Feed
+### Current development stage: multi-format Bible and Lyrics imports
 
-The user selected **network stream URL (RTSP/NDI)** as the first Live Feed source. Read `docs/LIVE_FEED_DESIGN.md` before implementation.
+The Live Feed implementation now supports operator-window camera/webcam capture, a WebRTC relay of the same camera to audience output, direct HTTP(S) video/HLS and MJPEG endpoints, plus the existing optional experimental RTSP/GStreamer adapter. Read `docs/LIVE_FEED_DESIGN.md` and verify these paths on desktop when camera hardware and supported stream endpoints are available. The code is not yet validated on Windows WebView2 or Ubuntu WebKitGTK.
 
-- Start with RTSP/RTSPS receive and display. Add NDI® discovery/receive as a separate follow-on after checking SDK distribution requirements.
-- Do not treat an RTSP URL as playable by an HTML `<video>` tag. Live video needs a native media backend and a transport path that works for both operator Preview and the separate audience window.
-- This Ubuntu VM now has GStreamer 1.28 development libraries and tools/base/good/libav plugins installed. The Rust backend compiles here; Windows runtime packaging is not yet solved. Check the current environment before changing dependencies; avoid a UI-only placeholder that cannot play the stream.
-- Address source lifecycle (connect, stop, reconnect/error state), latency, Preview/Live behavior, project references, and credentials. Do not put credentials in visible labels or exported project files; decide on safe credential handling before persisting URLs that contain them.
+Next, extend the resource library imports using the formats selected by the user:
+
+- Bible: USFM/USX, OSIS and Zefania XML.
+- Lyrics: OpenLyrics, OpenSong, OpenLP export, plain text and CSV.
+- Design format detection, validation, duplicate handling, import preview, metadata/attribution and transactional rollback before altering the SQLite library.
+- After resource imports, revisit Videos / Images in the desktop app. PNG/JPEG/GIF/WebP image import and MP4/WebM video import/playback code exists, but the user reports video uploads are not working and desktop verification is still outstanding. Diagnose and fix that workflow before broadening media formats.
+
+Keep direct camera and browser-playable HTTP(S) endpoints as the no-GStreamer default. A webview cannot play arbitrary RTSP/NDI addresses directly; keep those in native adapters. The existing GStreamer 1.28 RTSP backend is experimental and its Windows packaging is unresolved. Keep credentials out of labels, logs, saved projects and exports.
 
 ### Working approach
 
@@ -53,6 +57,6 @@ The user selected **network stream URL (RTSP/NDI)** as the first Live Feed sourc
 
 ### Current Git handoff
 
-At the initial handoff, the repository was pushed to `origin/main` at `2473572`. Check Git status and current history for the newer RTSP implementation; do not assume this guide or the remote has already been updated.
+Check the current branch, status, remotes, local commits and remote state; do not assume new work has been pushed. At the start of the camera/URL implementation session, `main` was one commit ahead of `origin/main` at local commit `1aab387` (`feat: add RTSP network live feed`), and `docs/LIVE_FEED_DESIGN.md` already contained an uncommitted user-approved direction update. Preserve those facts and any additional worktree edits.
 
 ---
