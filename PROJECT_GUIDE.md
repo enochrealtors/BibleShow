@@ -632,6 +632,7 @@ This section must be updated as development progresses.
 - The former Live status strip now provides KJV reference/range and keyword search. Multi-verse passages are added as one verse per slide. Single-click stages Preview; double-click or Enter sends directly to Live. Song sections remain visible beside the song list.
 - The audience output is a separate fullscreen Tauri window. The operator selects a connected display, and Live slides and alerts are synchronized to that window. Verify display routing and reopening behavior in the desktop app.
 - KJV keyword search occupies its own results view to keep the passage controls usable; choosing a result clears the search results and returns to the verse browser. Unsaved show changes offer save, discard or stay when changing projects or leaving.
+- The Videos / Images feed now imports PNG, JPEG, GIF and WebP images into BibleShow's local media library. Images can be previewed, sent Live and saved by media reference in local presentations. Video playback is the next media task.
 - The four-area layout includes resizable project/show, Preview/Live, content-feed, and local display-control areas. Only Bible and Lyrics feeds are connected to local content; remaining feed categories are placeholders.
 - The Profile/Edit/View/Settings/Connections/Plugins toolbar headings are visible, but detailed sub-items remain open for user brainstorming. Add future suggestions here as they arrive.
 - The product plan and navigation no longer include a dedicated Bible Study workspace. Scripture lookup remains part of presentation preparation.
@@ -663,7 +664,7 @@ These are the versions recorded during initial setup, not permanent requirements
 
 1. Verify the full-window layout, larger typography, feed scrolling, resizers, project import/export, save-before-close, display controls and alerts in the desktop app.
 2. Verify Bible keyword result selection, the unsaved-show prompt, project management and fullscreen audience output in the Tauri desktop app.
-3. Continue remaining content-feed implementation with the user.
+3. Add video import/playback and verify local image slides and project persistence in the Tauri desktop app.
 4. Define remaining content-feed and toolbar sub-items with the user before implementing each.
 5. Verify local presentation save/load/delete at runtime.
 

@@ -12,6 +12,7 @@ use zip::ZipArchive;
 const MAX_ARCHIVE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_MEMBER_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_UNCOMPRESSED_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_MEDIA_BYTES: usize = 25 * 1024 * 1024;
 const KJV_BOOKS: [&str; 66] = [
     "Genesis",
     "Exodus",
@@ -184,6 +185,7 @@ struct PresentationSlideInput {
     verse_number: Option<i64>,
     song_id: Option<String>,
     section_index: Option<i64>,
+    media_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -200,6 +202,19 @@ struct SavedPresentationSlide {
     verse_number: Option<i64>,
     song_id: Option<String>,
     section_index: Option<i64>,
+    media_id: Option<String>,
+    media_path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaFileSummary {
+    id: String,
+    filename: String,
+    media_type: String,
+    mime_type: String,
+    local_path: String,
+    file_size: u64,
 }
 
 #[derive(Serialize)]
@@ -251,7 +266,7 @@ fn import_initial_content(
     let schema_version: i64 = database
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(db_error)?;
-    if schema_version > 2 {
+    if schema_version > 4 {
         return Err("This BibleShow library was created by a newer app version. Update BibleShow before importing.".into());
     }
     let tx = database.transaction().map_err(db_error)?;
@@ -260,6 +275,12 @@ fn import_initial_content(
     }
     if schema_version < 2 {
         create_presentation_schema(&tx)?;
+    }
+    if schema_version < 3 {
+        create_media_schema(&tx)?;
+    }
+    if schema_version < 4 {
+        upgrade_presentation_media_schema(&tx)?;
     }
     let mut summary = ImportSummary {
         translation: "King James Version (KJV)".into(),
@@ -503,6 +524,59 @@ fn search_bible_keyword(app: tauri::AppHandle, query: String) -> Result<Vec<Bibl
 }
 
 #[tauri::command]
+fn import_media_file(app: tauri::AppHandle, request: Request<'_>) -> Result<MediaFileSummary, String> {
+    let packet = match request.body() {
+        InvokeBody::Raw(bytes) => bytes.as_slice(),
+        InvokeBody::Json(_) => return Err("Choose the image again; its binary data was not received.".into()),
+    };
+    if packet.len() < 3 || packet.len() > MAX_MEDIA_BYTES + 512 {
+        return Err("Choose an image smaller than 25 MB.".into());
+    }
+    let name_length = u16::from_be_bytes([packet[0], packet[1]]) as usize;
+    if name_length == 0 || name_length > 510 || packet.len() <= name_length + 2 {
+        return Err("The selected image has an invalid filename or empty file.".into());
+    }
+    let input_name = std::str::from_utf8(&packet[2..2 + name_length]).map_err(|_| "The image filename is not valid UTF-8.".to_string())?;
+    let bytes = &packet[2 + name_length..];
+    if bytes.len() > MAX_MEDIA_BYTES {
+        return Err("Choose an image smaller than 25 MB.".into());
+    }
+    let (extension, mime_type) = detect_image_type(bytes).ok_or_else(|| "This image format is not supported. Choose PNG, JPEG, GIF, or WebP.".to_string())?;
+    let digest = Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+    let original_name = PathBuf::from(input_name).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = PathBuf::from(&original_name).file_stem().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let safe_stem = stem.chars().filter(|character| character.is_ascii_alphanumeric() || *character == '-' || *character == '_' || *character == ' ').take(100).collect::<String>().trim().to_string();
+    let filename = format!("{}.{}", if safe_stem.is_empty() { format!("Image-{}", &digest[..8]) } else { safe_stem }, extension);
+    let app_data = app.path().app_data_dir().map_err(|error| format!("Could not locate BibleShow's media folder: {error}"))?;
+    let media_dir = app_data.join("media");
+    fs::create_dir_all(&media_dir).map_err(|error| format!("Could not create BibleShow's media folder: {error}"))?;
+    let local_path = media_dir.join(format!("{digest}.{extension}"));
+    if !local_path.exists() {
+        fs::write(&local_path, bytes).map_err(|error| format!("Could not store this image in BibleShow: {error}"))?;
+    }
+    let local_path_string = local_path.to_string_lossy().into_owned();
+    let db = open_library(&app)?;
+    db.execute("INSERT OR IGNORE INTO media_files(id,filename,media_type,mime_type,local_path,file_size,created_at) VALUES (?1,?2,'image',?3,?4,?5,datetime('now'))", params![digest,filename,mime_type,local_path_string,bytes.len() as i64]).map_err(db_error)?;
+    Ok(MediaFileSummary { id: digest, filename, media_type: "image".into(), mime_type: mime_type.into(), local_path: local_path_string, file_size: bytes.len() as u64 })
+}
+
+fn detect_image_type(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") { Some(("png", "image/png")) }
+    else if bytes.starts_with(b"\xff\xd8\xff") { Some(("jpg", "image/jpeg")) }
+    else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") { Some(("gif", "image/gif")) }
+    else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" { Some(("webp", "image/webp")) }
+    else { None }
+}
+
+#[tauri::command]
+fn get_media_files(app: tauri::AppHandle) -> Result<Vec<MediaFileSummary>, String> {
+    if !database_path(&app)?.exists() { return Ok(Vec::new()); }
+    let db = open_library(&app)?;
+    let mut query = db.prepare("SELECT id,filename,media_type,mime_type,local_path,file_size FROM media_files ORDER BY created_at DESC,filename COLLATE NOCASE").map_err(db_error)?;
+    query.query_map([], |row| Ok(MediaFileSummary { id: row.get(0)?, filename: row.get(1)?, media_type: row.get(2)?, mime_type: row.get(3)?, local_path: row.get(4)?, file_size: row.get::<_,i64>(5)? as u64 })).map_err(db_error)?.collect::<Result<Vec<_>,_>>().map_err(db_error)
+}
+
+#[tauri::command]
 fn get_available_displays(app: tauri::AppHandle) -> Result<Vec<DisplaySummary>, String> {
     app.available_monitors().map_err(|error| format!("Could not read connected displays: {error}"))?.into_iter().enumerate().map(|(index, monitor)| {
         let position = monitor.position();
@@ -674,7 +748,7 @@ fn save_presentation(
     };
     for (position, slide) in slides.iter().enumerate() {
         validate_presentation_slide(&tx, slide)?;
-        tx.execute("INSERT INTO presentation_items(presentation_id,position,content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,title,subtitle,reference_text) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", params![id,position as i64,slide.kind,slide.source_id,if slide.kind=="scripture" {Some("KJV")} else {None},slide.book_number,slide.chapter_number,slide.verse_number,slide.song_id,slide.section_index,slide.title,slide.subtitle,slide.reference]).map_err(db_error)?;
+        tx.execute("INSERT INTO presentation_items(presentation_id,position,content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", params![id,position as i64,slide.kind,slide.source_id,if slide.kind=="scripture" {Some("KJV")} else {None},slide.book_number,slide.chapter_number,slide.verse_number,slide.song_id,slide.section_index,slide.media_id,slide.title,slide.subtitle,slide.reference]).map_err(db_error)?;
     }
     tx.commit().map_err(db_error)?;
     Ok(id)
@@ -693,6 +767,11 @@ fn validate_presentation_slide(tx: &Transaction<'_>, slide: &PresentationSlideIn
             let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM song_sections WHERE song_id=?1 AND position=?2)", params![song_id,section], |row| row.get(0)).map_err(db_error)?;
             if !exists { return Err("A lyric page refers to a section that is not installed.".into()); }
         }
+        "image" => {
+            let media_id = slide.media_id.as_deref().ok_or("An image slide is missing its media reference.")?;
+            let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM media_files WHERE id=?1 AND media_type='image')", [media_id], |row| row.get(0)).map_err(db_error)?;
+            if !exists { return Err("An image slide refers to a file that is not in the local media library.".into()); }
+        }
         _ => return Err("This presentation page type is not supported yet.".into()),
     }
     Ok(())
@@ -702,21 +781,25 @@ fn validate_presentation_slide(tx: &Transaction<'_>, slide: &PresentationSlideIn
 fn load_presentation(app: tauri::AppHandle, presentation_id: i64) -> Result<SavedPresentation, String> {
     let db = open_library(&app)?;
     let title: String = db.query_row("SELECT title FROM presentations WHERE id=?1", [presentation_id], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| "That saved presentation could not be found.".to_string())?;
-    let mut query = db.prepare("SELECT content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,title,subtitle,reference_text FROM presentation_items WHERE presentation_id=?1 ORDER BY position").map_err(db_error)?;
+    let mut query = db.prepare("SELECT content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text FROM presentation_items WHERE presentation_id=?1 ORDER BY position").map_err(db_error)?;
     let records = query.query_map([presentation_id], |row| {
-        Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,row.get::<_,Option<i64>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<i64>>(7)?,row.get::<_,String>(8)?,row.get::<_,String>(9)?,row.get::<_,String>(10)?))
+        Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,row.get::<_,Option<i64>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<i64>>(7)?,row.get::<_,Option<String>>(8)?,row.get::<_,String>(9)?,row.get::<_,String>(10)?,row.get::<_,String>(11)?))
     }).map_err(db_error)?.collect::<Result<Vec<_>,_>>().map_err(db_error)?;
     let mut slides = Vec::with_capacity(records.len());
-    for (kind, source_id, translation_id, book_number, chapter_number, verse_number, song_id, section_index, saved_title, subtitle, reference) in records {
-        let body = if kind == "scripture" {
+    for (kind, source_id, translation_id, book_number, chapter_number, verse_number, song_id, section_index, media_id, saved_title, subtitle, reference) in records {
+        let (body, media_path) = if kind == "scripture" {
             let (translation, book, chapter, verse) = (translation_id.as_deref().unwrap_or("KJV"),book_number.ok_or("A saved Scripture page is missing its book.")?,chapter_number.ok_or("A saved Scripture page is missing its chapter.")?,verse_number.ok_or("A saved Scripture page is missing its verse.")?);
-            db.query_row("SELECT text FROM bible_verses WHERE translation_id=?1 AND book_number=?2 AND chapter_number=?3 AND verse_number=?4", params![translation,book,chapter,verse], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The verse for {saved_title} is no longer installed."))?
-        } else {
+            (db.query_row("SELECT text FROM bible_verses WHERE translation_id=?1 AND book_number=?2 AND chapter_number=?3 AND verse_number=?4", params![translation,book,chapter,verse], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The verse for {saved_title} is no longer installed."))?, None)
+        } else if kind == "lyrics" {
             let song = song_id.as_deref().ok_or("A saved lyric page is missing its song.")?;
             let section = section_index.ok_or("A saved lyric page is missing its section.")?;
-            db.query_row("SELECT lyrics FROM song_sections WHERE song_id=?1 AND position=?2", params![song,section], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The lyrics for {saved_title} are no longer installed."))?
+            (db.query_row("SELECT lyrics FROM song_sections WHERE song_id=?1 AND position=?2", params![song,section], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The lyrics for {saved_title} are no longer installed."))?, None)
+        } else {
+            let media = media_id.as_deref().ok_or("A saved image page is missing its media reference.")?;
+            let path: String = db.query_row("SELECT local_path FROM media_files WHERE id=?1 AND media_type='image'", [media], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The image for {saved_title} is no longer installed."))?;
+            (String::new(), Some(path))
         };
-        slides.push(SavedPresentationSlide { source_id,title:saved_title,subtitle,reference,kind,body,book_number,chapter_number,verse_number,song_id,section_index });
+        slides.push(SavedPresentationSlide { source_id,title:saved_title,subtitle,reference,kind,body,book_number,chapter_number,verse_number,song_id,section_index,media_id,media_path });
     }
     Ok(SavedPresentation { id:presentation_id,title,slides })
 }
@@ -928,10 +1011,57 @@ fn create_presentation_schema(tx: &Transaction<'_>) -> Result<(), String> {
     .map_err(db_error)
 }
 
+fn create_media_schema(tx: &Transaction<'_>) -> Result<(), String> {
+    tx.execute_batch("CREATE TABLE IF NOT EXISTS media_files(
+      id TEXT PRIMARY KEY,
+      filename TEXT NOT NULL,
+      media_type TEXT NOT NULL CHECK(media_type IN ('image')),
+      mime_type TEXT NOT NULL,
+      local_path TEXT NOT NULL UNIQUE,
+      file_size INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    PRAGMA user_version=3;")
+    .map_err(db_error)
+}
+
+fn upgrade_presentation_media_schema(tx: &Transaction<'_>) -> Result<(), String> {
+    tx.execute_batch("ALTER TABLE presentation_items RENAME TO presentation_items_v2;
+    CREATE TABLE presentation_items(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      presentation_id INTEGER NOT NULL,
+      position INTEGER NOT NULL,
+      content_type TEXT NOT NULL CHECK(content_type IN ('scripture','lyrics','image')),
+      source_id TEXT NOT NULL,
+      translation_id TEXT,
+      book_number INTEGER,
+      chapter_number INTEGER,
+      verse_number INTEGER,
+      song_id TEXT,
+      section_index INTEGER,
+      media_id TEXT,
+      title TEXT NOT NULL,
+      subtitle TEXT NOT NULL,
+      reference_text TEXT NOT NULL,
+      UNIQUE(presentation_id,position),
+      FOREIGN KEY(presentation_id) REFERENCES presentations(id) ON DELETE CASCADE,
+      FOREIGN KEY(translation_id,book_number,chapter_number,verse_number) REFERENCES bible_verses(translation_id,book_number,chapter_number,verse_number),
+      FOREIGN KEY(song_id,section_index) REFERENCES song_sections(song_id,position),
+      FOREIGN KEY(media_id) REFERENCES media_files(id) ON DELETE RESTRICT,
+      CHECK((content_type='scripture' AND translation_id IS NOT NULL AND book_number IS NOT NULL AND chapter_number IS NOT NULL AND verse_number IS NOT NULL AND song_id IS NULL AND section_index IS NULL AND media_id IS NULL) OR (content_type='lyrics' AND song_id IS NOT NULL AND section_index IS NOT NULL AND translation_id IS NULL AND book_number IS NULL AND chapter_number IS NULL AND verse_number IS NULL AND media_id IS NULL) OR (content_type='image' AND media_id IS NOT NULL AND translation_id IS NULL AND book_number IS NULL AND chapter_number IS NULL AND verse_number IS NULL AND song_id IS NULL AND section_index IS NULL))
+    );
+    INSERT INTO presentation_items(id,presentation_id,position,content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text)
+      SELECT id,presentation_id,position,content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,NULL,title,subtitle,reference_text FROM presentation_items_v2;
+    DROP TABLE presentation_items_v2;
+    CREATE INDEX IF NOT EXISTS idx_presentation_items_order ON presentation_items(presentation_id,position);
+    PRAGMA user_version=4;")
+    .map_err(db_error)
+}
+
 fn ensure_current_schema(db: &mut Connection) -> Result<(), String> {
     db.execute_batch("PRAGMA foreign_keys=ON;").map_err(db_error)?;
     let mut version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0)).map_err(db_error)?;
-    if version > 2 {
+    if version > 4 {
         return Err("This BibleShow library was created by a newer app version. Update BibleShow first.".into());
     }
     if version < 1 {
@@ -943,6 +1073,18 @@ fn ensure_current_schema(db: &mut Connection) -> Result<(), String> {
     if version < 2 {
         let tx = db.transaction().map_err(db_error)?;
         create_presentation_schema(&tx)?;
+        tx.commit().map_err(db_error)?;
+        version = 2;
+    }
+    if version < 3 {
+        let tx = db.transaction().map_err(db_error)?;
+        create_media_schema(&tx)?;
+        tx.commit().map_err(db_error)?;
+        version = 3;
+    }
+    if version < 4 {
+        let tx = db.transaction().map_err(db_error)?;
+        upgrade_presentation_media_schema(&tx)?;
         tx.commit().map_err(db_error)?;
     }
     Ok(())
@@ -988,6 +1130,8 @@ pub fn run() {
             get_bible_books,
             get_bible_chapter,
             search_bible_keyword,
+            import_media_file,
+            get_media_files,
             get_available_displays,
             set_audience_window_visible,
             get_song_library,

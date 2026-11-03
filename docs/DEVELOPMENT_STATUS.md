@@ -90,6 +90,7 @@ Versions are historical records and should be checked before major upgrades.
 - Added a separate hidden-at-startup audience output window, connected-display selection, fullscreen monitor placement, and event-based mirroring of Live slides and alerts.
 - Changed KJV keyword search into a dedicated results view so search results no longer crowd book/chapter and passage controls; selecting a result returns to the verse browser and clears the result panel.
 - Added a three-choice unsaved-show prompt (Save and continue, Discard changes, Stay here) for leaving Presentation, starting a new show, or opening another project.
+- Implemented the first Videos / Images feed slice: local image import and browsing, image Preview/Live output, and media references in saved presentations. Added SQLite schema upgrades from versions 2 through 4 for media metadata and image presentation items. Video playback remains future work.
 
 ### Desktop foundation
 - Tauri 2 initialised.
@@ -201,7 +202,7 @@ The next development sequence is:
 
 1. Verify keyword results-only browsing, passage staging, the unsaved-show prompt, and project import/export in the Tauri app.
 2. Exercise local project save/load/delete and fullscreen audience output reopening on available displays in the Tauri app.
-3. Continue project management and the remaining content feeds, agreeing their sub-items with the user as each area is implemented.
+3. Add video import/playback to the Videos / Images feed; design the remaining feed sub-items with the user as each is implemented.
 5. Review KJV/song rights for target release markets before bundling content in a public build; review the 700 incomplete songs when verified lyric sources become available.
 
 Do not jump ahead to advanced AI or cloud functionality.
@@ -219,4 +220,4 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Review the updated Bible keyword results view and three-choice unsaved-show prompt in Tauri. Verify passage staging, project import/export, save/load/delete, and fullscreen audience output routing. Then continue project management and the remaining content feeds.
+**Current restart point:** Review the updated Bible keyword results view, unsaved-show prompt, and image library in Tauri. Verify image import, saved image slides, and audience output, alongside passage staging and project workflows. Then add video playback and continue the remaining content feeds.

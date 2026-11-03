@@ -68,6 +68,7 @@ No feature should be marked implemented until it has been tested.
 - [x] Multi-verse passages are staged as one readable verse per slide.
 - [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.
 - [x] Lyrics feed shows song sections alongside the song list.
+- [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images into the local library and stages them as presentation slides; video playback remains future work.
 - [x] Keyword search results use a dedicated view and clear when a verse is selected.
 - [x] Unsaved project changes prompt to save, discard, or stay before leaving, starting a new show, or opening another project.
 - [~] Right-panel controls for clearing Preview/Live content, closing the local Live monitor, and static/scrolling alerts in that monitor.

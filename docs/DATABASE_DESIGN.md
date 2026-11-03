@@ -167,6 +167,8 @@ Presentation content must reference Bible passages where appropriate rather than
 
 Stores metadata about imported media.
 
+The first implementation stores local image assets under BibleShow's application data directory. The SQLite record keeps the content hash, display filename, MIME type, size and local path. Supported initial image formats are PNG, JPEG, GIF and WebP.
+
 Proposed fields:
 - id
 - filename

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
-import { invoke, isTauri } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import './App.css'
 
@@ -30,8 +30,9 @@ type ChapterData = { book_number: number; name: string; chapter_number: number; 
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
-type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number }
+type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string }
 type QueuedSlide = PresentationSlide & { queueId: string }
+type MediaFile = { id: string; filename: string; mediaType: string; mimeType: string; localPath: string; fileSize: number }
 type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null }
 type DisplaySummary = { index: number; name: string; x: number; y: number; width: number; height: number }
 type PendingProjectAction = { kind: 'leave' } | { kind: 'new' } | { kind: 'open'; id: number }
@@ -43,7 +44,7 @@ const presentationFeedLabels: Record<PresentationFeed, string> = {
 }
 
 function persistedSlides(slides: readonly PresentationSlide[]) {
-  return slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex }))
+  return slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex, mediaId }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex, mediaId }))
 }
 
 function projectSnapshot(title: string, slides: readonly PresentationSlide[]) {
@@ -307,7 +308,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     if (!raw) return
     try {
       const slide = JSON.parse(raw) as PresentationSlide
-      if ((slide.kind !== 'scripture' && slide.kind !== 'lyrics') || !slide.sourceId || !slide.body) return
+      if (!['scripture', 'lyrics', 'image'].includes(slide.kind) || !slide.sourceId || (slide.kind === 'image' ? !slide.mediaId || !slide.mediaPath : !slide.body)) return
       addToSequence(slide)
       setPersistenceMessage(`${slide.title} added to this show.`)
     } catch {
@@ -360,7 +361,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
       const id = await invoke<number>('save_presentation', {
         presentationId,
         title: presentationTitle,
-        slides: sequence.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex })),
+        slides: persistedSlides(sequence),
       })
       setPresentationId(id)
       setSavedProjectSnapshot(snapshot)
@@ -417,7 +418,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
       const id = await invoke<number>('save_presentation', {
         presentationId: null,
         title: project.title,
-        slides: slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, songId, sectionIndex })),
+        slides: persistedSlides(slides),
       })
       await refreshPresentations()
       const opened = await openPresentation(id)
@@ -587,7 +588,8 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
             <div className="feed-content">
               {activeFeed === 'bible' && <BibleSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} previewSourceId={previewSlide?.sourceId ?? null} searchRequest={bibleSearchRequest} />}
               {activeFeed === 'lyrics' && <SongSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
-              {activeFeed !== 'bible' && activeFeed !== 'lyrics' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>This content feed is planned. Its item types and controls will be designed before it is implemented.</p></div>}
+              {activeFeed === 'media' && <MediaSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
+              {activeFeed !== 'bible' && activeFeed !== 'lyrics' && activeFeed !== 'media' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>This content feed is planned. Its item types and controls will be designed before it is implemented.</p></div>}
             </div>
           </section>
         </main>
@@ -785,8 +787,60 @@ function SongSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { o
   )
 }
 
+function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onAdd: (slide: PresentationSlide) => void; previewSourceId: string | null }) {
+  const [files, setFiles] = useState<MediaFile[]>([])
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const displayMessage = message || (!isTauri() ? 'Open the desktop app to import and display local images.' : '')
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    invoke<MediaFile[]>('get_media_files').then((items) => { if (active) setFiles(items) }).catch((error) => { if (active) setMessage(String(error)) })
+    return () => { active = false }
+  }, [])
+
+  async function importImages(selected: FileList | null) {
+    if (!selected?.length) return
+    setBusy(true)
+    setMessage(`Importing ${selected.length} image${selected.length === 1 ? '' : 's'}…`)
+    try {
+      const imported: MediaFile[] = []
+      const encoder = new TextEncoder()
+      for (const file of Array.from(selected)) {
+        const name = encoder.encode(file.name)
+        if (!name.length || name.length > 510) throw new Error(`${file.name} has a filename that is too long.`)
+        const contents = new Uint8Array(await file.arrayBuffer())
+        const packet = new Uint8Array(2 + name.length + contents.length)
+        packet[0] = (name.length >> 8) & 0xff
+        packet[1] = name.length & 0xff
+        packet.set(name, 2)
+        packet.set(contents, 2 + name.length)
+        imported.push(await invoke<MediaFile>('import_media_file', packet))
+      }
+      setFiles((current) => [...imported, ...current.filter((file) => !imported.some((item) => item.id === file.id))])
+      setMessage(`${imported.length} image${imported.length === 1 ? '' : 's'} added to this device.`)
+    } catch (error) { setMessage(String(error)) }
+    finally { setBusy(false) }
+  }
+
+  return <div className="source-browser media-source-browser">
+    <div className="media-feed-toolbar"><div><strong>Image library</strong><span>{files.length} images on this device</span></div><label className="media-import-button">{busy ? 'Importing…' : 'Import images'}<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple disabled={busy} onChange={(event) => { void importImages(event.currentTarget.files); event.currentTarget.value = '' }} /></label></div>
+    {displayMessage && <p className="media-feed-message" role="status">{displayMessage}</p>}
+    <div className="media-image-grid">{files.map((file) => {
+      const slide: PresentationSlide = { sourceId: `media:${file.id}`, title: file.filename, subtitle: 'Image', body: '', reference: file.filename, kind: 'image', mediaId: file.id, mediaPath: file.localPath }
+      const isPreview = previewSourceId === slide.sourceId
+      return <article className={`media-image-card${isPreview ? ' is-preview' : ''}`} key={file.id}>
+        <button className="media-image-preview" aria-label={`Preview ${file.filename}; double-click to send Live`} onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}><img src={convertFileSrc(file.localPath)} alt="" loading="lazy" /><span>{file.filename}</span></button>
+        <button className="media-image-add" onClick={() => onAdd(slide)} aria-label={`Add ${file.filename} to this show`}>＋</button>
+      </article>
+    })}{!files.length && !busy && <p className="media-library-empty">Import PNG, JPEG, GIF or WebP images to use them as presentation slides.</p>}</div>
+  </div>
+}
+
 function SlideScreen({ slide, emptyLabel }: { slide: PresentationSlide | null; emptyLabel: string }) {
   if (!slide) return <div className="operator-screen is-empty"><div><Icon name="screen" size={23} /><span>{emptyLabel}</span></div></div>
+  if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /><strong>{slide.reference}</strong></article>
   return <article className={`operator-screen ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{slide.subtitle}</span><p>{slide.body}</p><strong>{slide.reference}</strong></article>
 }
 
@@ -805,7 +859,7 @@ export function AudienceWindow() {
   }, [])
 
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
   </main>
 }
