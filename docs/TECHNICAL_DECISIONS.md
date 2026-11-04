@@ -207,15 +207,15 @@ Rules:
 **Application name:** BibleShow  
 **Status:** AGREED
 
-The permanent application identifier remains pending approval.
+**Identifier:** `com.enochrealtors.bibleshow`
+**Status:** Selected from the BibleShow name and the owner's GitHub namespace to replace Tauri's rejected development placeholder.
 
-The initial Tauri identifier `com.tauri.dev` is temporary and must be replaced before release.
+The data directory remains explicitly mapped to the existing `com.tauri.dev` folder during this transition so current Ubuntu BibleShow libraries remain available after changing the package identifier. Plan and document a data migration before changing that storage override.
 
 ## 17. Decisions Requiring Future Evaluation
 
 The following are not yet finalised:
 
-- Permanent application identifier.
 - Final UI component library.
 - Final SQLite integration approach.
 - Bible translation sources and licences.

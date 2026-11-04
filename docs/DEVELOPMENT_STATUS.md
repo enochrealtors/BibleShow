@@ -131,9 +131,8 @@ Media projection and Scripture detection have not been implemented.
 
 ## 5. Known Configuration Items
 
-- Tauri application identifier is still the temporary `com.tauri.dev`.
-- Git repository is on `main`; baseline commit `90eef49` is pushed to `origin/main`.
-- Shell commit `9ded581` is local and not yet pushed; `main` is one commit ahead of `origin/main`.
+- Tauri application identifier is `com.enochrealtors.bibleshow`; the current data folder remains mapped to `com.tauri.dev` to preserve existing local libraries.
+- Check the current Git branch, worktree, and remote status before continuing; do not rely on older commit snapshots in this document.
 - Final application branding is pending.
 - The frontend remains on the initial Vite React/TypeScript foundation, with a custom BibleShow shell.
 
@@ -266,3 +265,9 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - Added `docs/PROJECT_SUGGESTIONS.md` as the append-only suggestion and feedback log, linked from `PROJECT_GUIDE.md` and `docs/FEATURES.md`.
 - Recorded the Windows laptop workflow as a planned project item. A separate Windows checkout can use the same GitHub repository; cross-platform development and Windows dependencies still need validation.
 - Current local branch at inspection: `main`, six commits ahead of `origin/main`; these code and documentation changes remain uncommitted and have not been pushed.
+
+### 13. Current session — unique Tauri application identifier
+
+- The Ubuntu trial workflow failed before packaging because Tauri rejects the default `com.tauri.dev` bundle identifier.
+- Changed the application identifier to `com.enochrealtors.bibleshow`.
+- Kept Tauri's app data directory mapped to the existing `com.tauri.dev` data folder so changing the identifier does not hide an existing local Bible/lyrics library or media files. Revisit this transitional mapping only with an explicit data migration plan.
