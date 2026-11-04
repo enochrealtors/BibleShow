@@ -616,6 +616,14 @@ h1, h2, p { margin-top: 0; }
 .project-change-dialog button { min-height: 36px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--text-strong); background: var(--surface-soft); cursor: pointer; font: inherit; font-size: 12px; }
 .project-change-dialog button.save-presentation-button { border-color: #466a4e; color: #fff; background: #486b50; }
 .project-change-dialog button:disabled { opacity: .5; cursor: default; }
+.slide-edit-dialog { display: grid; max-height: min(88vh, 760px); gap: 12px; overflow-y: auto; }
+.slide-edit-dialog h2 { margin-bottom: 0; }
+.slide-edit-dialog > label { display: grid; gap: 5px; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+.slide-edit-dialog input, .slide-edit-dialog textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 5px; color: var(--text-strong); background: var(--surface-soft); font: inherit; font-size: 13px; }
+.slide-edit-dialog textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
+.slide-edit-dialog > label > span { font-size: 10px; font-weight: 400; line-height: 1.4; }
+.slide-edit-dialog > label > button { justify-self: start; min-height: 28px; border: 1px solid var(--line); border-radius: 4px; color: var(--text); background: var(--surface-soft); cursor: pointer; font: inherit; font-size: 10px; }
+.slide-edit-dialog > div { margin-top: 4px; }
 .feed-content .source-browser { min-height: 0; flex: 1 1 0; overflow: hidden; }
 .source-verse-list { height: 0; min-height: 0; flex: 1 1 0; overflow-y: scroll; overscroll-behavior: contain; scrollbar-gutter: stable; touch-action: pan-y; }
 .source-sections { height: 0; min-height: 0; flex: 1 1 0; overflow-y: auto; overscroll-behavior: contain; }

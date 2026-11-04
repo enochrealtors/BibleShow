@@ -2,7 +2,7 @@
 
 **Document version:** 1.1
 **Last updated:** 3 November 2026
-**Status:** Local KJV/song schema, saved presentations, image library, and video library implemented; SQLite schema version 5.
+**Status:** Local KJV/song schema, saved presentations, image and video libraries, and per-slide presentation text overrides implemented; SQLite schema version 6.
 
 ---
 
@@ -400,6 +400,12 @@ Scripture slides should store a book code, chapter, verse range, versification i
 - A presentation item stores either KJV verse coordinates or a song ID and section position. Its displayed body is resolved from the local Bible or song tables when loaded; the item does not duplicate the source text.
 - Foreign keys and checks constrain references, content kinds, and required coordinate fields. Foreign-key enforcement is enabled on library connections.
 - Schema updates are transactional and older version-1 libraries are upgraded when opened.
+
+### Implemented schema version 6
+
+- Version 6 adds nullable `presentation_items.body_override` for custom text on an individual Scripture or lyric slide.
+- The Bible/lyrics source tables remain unchanged. Loading a saved project uses the override when present and otherwise hydrates the original local source text.
+- Older version-5 libraries are upgraded in a transaction when opened or when a Bible package import initializes the local schema.
 
 ## 17. Design Decisions Still Open
 

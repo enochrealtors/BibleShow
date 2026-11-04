@@ -211,6 +211,7 @@ struct PresentationSlideInput {
     song_id: Option<String>,
     section_index: Option<i64>,
     media_id: Option<String>,
+    body_override: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -222,6 +223,7 @@ struct SavedPresentationSlide {
     reference: String,
     kind: String,
     body: String,
+    body_override: Option<String>,
     book_number: Option<i64>,
     chapter_number: Option<i64>,
     verse_number: Option<i64>,
@@ -294,7 +296,7 @@ fn import_initial_content(
     let schema_version: i64 = database
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(db_error)?;
-    if schema_version > 5 {
+    if schema_version > 6 {
         return Err("This BibleShow library was created by a newer app version. Update BibleShow before importing.".into());
     }
     let tx = database.transaction().map_err(db_error)?;
@@ -312,6 +314,9 @@ fn import_initial_content(
     }
     if schema_version < 5 {
         upgrade_presentation_video_schema(&tx)?;
+    }
+    if schema_version < 6 {
+        upgrade_presentation_slide_text_schema(&tx)?;
     }
     let mut summary = ImportSummary {
         translation: "King James Version (KJV)".into(),
@@ -896,6 +901,9 @@ fn save_presentation(
     if slides.len() > 500 {
         return Err("A presentation can contain up to 500 pages.".into());
     }
+    if slides.iter().any(|slide| slide.body_override.as_ref().is_some_and(|body| body.chars().count() > 4000)) {
+        return Err("Edited slide text must be 4,000 characters or fewer.".into());
+    }
     let mut db = open_library(&app)?;
     let tx = db.transaction().map_err(db_error)?;
     let id = if let Some(id) = presentation_id {
@@ -909,7 +917,7 @@ fn save_presentation(
     };
     for (position, slide) in slides.iter().enumerate() {
         validate_presentation_slide(&tx, slide)?;
-        tx.execute("INSERT INTO presentation_items(presentation_id,position,content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)", params![id,position as i64,slide.kind,slide.source_id,if slide.kind=="scripture" {Some(slide.translation_id.as_deref().unwrap_or("KJV"))} else {None},slide.book_number,slide.chapter_number,slide.verse_number,slide.song_id,slide.section_index,slide.media_id,slide.title,slide.subtitle,slide.reference]).map_err(db_error)?;
+        tx.execute("INSERT INTO presentation_items(presentation_id,position,content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text,body_override) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)", params![id,position as i64,slide.kind,slide.source_id,if slide.kind=="scripture" {Some(slide.translation_id.as_deref().unwrap_or("KJV"))} else {None},slide.book_number,slide.chapter_number,slide.verse_number,slide.song_id,slide.section_index,slide.media_id,slide.title,slide.subtitle,slide.reference,slide.body_override]).map_err(db_error)?;
     }
     tx.commit().map_err(db_error)?;
     Ok(id)
@@ -948,12 +956,12 @@ fn validate_presentation_slide(tx: &Transaction<'_>, slide: &PresentationSlideIn
 fn load_presentation(app: tauri::AppHandle, media_stream: tauri::State<'_, media_stream::MediaStreamState>, presentation_id: i64) -> Result<SavedPresentation, String> {
     let db = open_library(&app)?;
     let title: String = db.query_row("SELECT title FROM presentations WHERE id=?1", [presentation_id], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| "That saved presentation could not be found.".to_string())?;
-    let mut query = db.prepare("SELECT content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text FROM presentation_items WHERE presentation_id=?1 ORDER BY position").map_err(db_error)?;
+    let mut query = db.prepare("SELECT content_type,source_id,translation_id,book_number,chapter_number,verse_number,song_id,section_index,media_id,title,subtitle,reference_text,body_override FROM presentation_items WHERE presentation_id=?1 ORDER BY position").map_err(db_error)?;
     let records = query.query_map([presentation_id], |row| {
-        Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,row.get::<_,Option<i64>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<i64>>(7)?,row.get::<_,Option<String>>(8)?,row.get::<_,String>(9)?,row.get::<_,String>(10)?,row.get::<_,String>(11)?))
+        Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<i64>>(3)?,row.get::<_,Option<i64>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<String>>(6)?,row.get::<_,Option<i64>>(7)?,row.get::<_,Option<String>>(8)?,row.get::<_,String>(9)?,row.get::<_,String>(10)?,row.get::<_,String>(11)?,row.get::<_,Option<String>>(12)?))
     }).map_err(db_error)?.collect::<Result<Vec<_>,_>>().map_err(db_error)?;
     let mut slides = Vec::with_capacity(records.len());
-    for (kind, source_id, translation_id, book_number, chapter_number, verse_number, song_id, section_index, media_id, saved_title, subtitle, reference) in records {
+    for (kind, source_id, translation_id, book_number, chapter_number, verse_number, song_id, section_index, media_id, saved_title, subtitle, reference, body_override) in records {
         let (body, media_path, media_url) = if kind == "scripture" {
             let (translation, book, chapter, verse) = (translation_id.as_deref().unwrap_or("KJV"),book_number.ok_or("A saved Scripture page is missing its book.")?,chapter_number.ok_or("A saved Scripture page is missing its chapter.")?,verse_number.ok_or("A saved Scripture page is missing its verse.")?);
             (db.query_row("SELECT text FROM bible_verses WHERE translation_id=?1 AND book_number=?2 AND chapter_number=?3 AND verse_number=?4", params![translation,book,chapter,verse], |row| row.get(0)).optional().map_err(db_error)?.ok_or_else(|| format!("The verse for {saved_title} is no longer installed."))?, None, None)
@@ -973,7 +981,7 @@ fn load_presentation(app: tauri::AppHandle, media_stream: tauri::State<'_, media
             };
             (String::new(), Some(path), url)
         };
-        slides.push(SavedPresentationSlide { source_id,title:saved_title,subtitle,reference,kind,body,book_number,chapter_number,verse_number,translation_id,song_id,section_index,media_id,media_path,media_url });
+        slides.push(SavedPresentationSlide { source_id,title:saved_title,subtitle,reference,kind,body,body_override,book_number,chapter_number,verse_number,translation_id,song_id,section_index,media_id,media_path,media_url });
     }
     Ok(SavedPresentation { id:presentation_id,title,slides })
 }
@@ -1275,7 +1283,7 @@ fn upgrade_presentation_video_schema(tx: &Transaction<'_>) -> Result<(), String>
 fn ensure_current_schema(db: &mut Connection) -> Result<(), String> {
     db.execute_batch("PRAGMA foreign_keys=ON;").map_err(db_error)?;
     let mut version: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0)).map_err(db_error)?;
-    if version > 5 {
+    if version > 6 {
         return Err("This BibleShow library was created by a newer app version. Update BibleShow first.".into());
     }
     if version < 1 {
@@ -1306,8 +1314,19 @@ fn ensure_current_schema(db: &mut Connection) -> Result<(), String> {
         let tx = db.transaction().map_err(db_error)?;
         upgrade_presentation_video_schema(&tx)?;
         tx.commit().map_err(db_error)?;
+        version = 5;
+    }
+    if version < 6 {
+        let tx = db.transaction().map_err(db_error)?;
+        upgrade_presentation_slide_text_schema(&tx)?;
+        tx.commit().map_err(db_error)?;
     }
     Ok(())
+}
+
+fn upgrade_presentation_slide_text_schema(tx: &Transaction<'_>) -> Result<(), String> {
+    tx.execute_batch("ALTER TABLE presentation_items ADD COLUMN body_override TEXT; PRAGMA user_version=6;")
+        .map_err(db_error)
 }
 
 fn database_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {

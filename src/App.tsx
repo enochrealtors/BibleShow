@@ -33,7 +33,7 @@ type ChapterData = { book_number: number; name: string; chapter_number: number; 
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
-type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; translationId?: string; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; mediaUrl?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
+type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; bodyOverride?: string | null; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; translationId?: string; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; mediaUrl?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
 type QueuedSlide = PresentationSlide & { queueId: string }
 type MediaFile = { id: string; filename: string; mediaType: 'image' | 'video'; mimeType: string; localPath: string; fileSize: number; playbackUrl?: string | null }
 type VideoPlayback = { sourceId: string; isPlaying: boolean; loop: boolean; currentTime: number; duration: number; startAtMs: number; updatedAtMs: number; commandId: number }
@@ -70,8 +70,10 @@ const presentationFeedLabels: Record<PresentationFeed, string> = {
 }
 
 function persistedSlides(slides: readonly PresentationSlide[]) {
-  return slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId }))
+  return slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId, bodyOverride }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId, bodyOverride: bodyOverride ?? undefined }))
 }
+
+function displayBody(slide: PresentationSlide) { return slide.bodyOverride ?? slide.body }
 
 function projectSnapshot(title: string, slides: readonly PresentationSlide[]) {
   return JSON.stringify({ title, slides: persistedSlides(slides) })
@@ -287,6 +289,8 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [livePlayback, setLivePlayback] = useState<VideoPlayback | null>(null)
   const [delayLiveVideo, setDelayLiveVideo] = useState(false)
   const [sequence, setSequence] = useState<QueuedSlide[]>([])
+  const [editingPosition, setEditingPosition] = useState<number | null>(null)
+  const [slideDraft, setSlideDraft] = useState({ title: '', subtitle: '', reference: '', body: '' })
   const [previewPosition, setPreviewPosition] = useState<number | null>(null)
   const [livePosition, setLivePosition] = useState<number | null>(null)
   const [presentationId, setPresentationId] = useState<number | null>(null)
@@ -718,6 +722,33 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     else if (livePosition !== null && livePosition > position) setLivePosition(livePosition - 1)
   }
 
+  function beginSlideEdit(position: number) {
+    const slide = sequence[position]
+    if (!slide) return
+    setSlideDraft({ title: slide.title, subtitle: slide.subtitle, reference: slide.reference, body: displayBody(slide) })
+    setEditingPosition(position)
+  }
+
+  function saveSlideEdit() {
+    if (editingPosition === null) return
+    const original = sequence[editingPosition]
+    if (!original) { setEditingPosition(null); return }
+    const title = slideDraft.title.trim()
+    if (!title) return
+    const hasEditableText = original.kind === 'scripture' || original.kind === 'lyrics'
+    const updated: QueuedSlide = {
+      ...original,
+      title,
+      subtitle: slideDraft.subtitle.trim(),
+      reference: slideDraft.reference.trim(),
+      ...(hasEditableText ? { bodyOverride: slideDraft.body === original.body ? null : slideDraft.body } : {}),
+    }
+    setSequence((items) => items.map((item, index) => index === editingPosition ? updated : item))
+    if (previewPosition === editingPosition) stagePreview(updated, editingPosition)
+    setPersistenceMessage('Slide updated in this show. Save the project to keep the changes.')
+    setEditingPosition(null)
+  }
+
   function moveSequenceItem(position: number, direction: -1 | 1) {
     const target = position + direction
     if (target < 0 || target >= sequence.length) return
@@ -758,6 +789,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
       </div>
       {toolbarPanel && <div className="toolbar-placeholder" role="status"><strong>{toolbarPanel}</strong> options will be shaped with you as this area is implemented.</div>}
       {pendingProjectAction && <div className="project-change-backdrop"><section className="project-change-dialog" role="dialog" aria-modal="true" aria-labelledby="project-change-title"><h2 id="project-change-title">Unsaved show changes</h2><p>{pendingProjectAction.kind === 'leave' ? 'Save your changes before leaving the presentation workspace?' : pendingProjectAction.kind === 'new' ? 'Save your changes before starting a new show?' : 'Save your changes before opening another project?'}</p><div><button className="save-presentation-button" onClick={() => void resolvePendingProjectAction('save')} disabled={persistenceBusy}>Save and continue</button><button onClick={() => void resolvePendingProjectAction('discard')} disabled={persistenceBusy}>Discard changes</button><button onClick={() => void resolvePendingProjectAction('stay')} disabled={persistenceBusy}>Stay here</button></div></section></div>}
+      {editingPosition !== null && <div className="project-change-backdrop"><form className="project-change-dialog slide-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="slide-edit-title" onSubmit={(event) => { event.preventDefault(); saveSlideEdit() }}><h2 id="slide-edit-title">Edit show slide</h2><label>Title<input autoFocus maxLength={160} value={slideDraft.title} onChange={(event) => setSlideDraft((draft) => ({ ...draft, title: event.target.value }))} /></label><label>Subtitle<input maxLength={160} value={slideDraft.subtitle} onChange={(event) => setSlideDraft((draft) => ({ ...draft, subtitle: event.target.value }))} /></label><label>Reference or attribution<input maxLength={160} value={slideDraft.reference} onChange={(event) => setSlideDraft((draft) => ({ ...draft, reference: event.target.value }))} /></label>{['scripture', 'lyrics'].includes(sequence[editingPosition]?.kind ?? '') && <label>Displayed text<textarea maxLength={4000} rows={7} value={slideDraft.body} onChange={(event) => setSlideDraft((draft) => ({ ...draft, body: event.target.value }))} /><span>Text changes apply only to this show slide. The imported Bible or song remains unchanged.</span><button type="button" onClick={() => setSlideDraft((draft) => ({ ...draft, body: sequence[editingPosition]?.body ?? '' }))}>Reset text to source</button></label>}<div><button type="button" onClick={() => setEditingPosition(null)}>Cancel</button><button type="submit" className="save-presentation-button" disabled={!slideDraft.title.trim()}>Apply to show</button></div></form></div>}
 
       <div className="operator-layout" style={{ '--left-pane-width': `${paneSizes.left}px`, '--right-pane-width': `${paneSizes.right}px`, '--center-top-height': `${paneSizes.centerTop}px` } as CSSProperties}>
         <aside className="operator-projects operator-pane">
@@ -772,9 +804,9 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
           <p className="sequence-help">Drag content here or use + to add it. Reorder with the arrows.</p>
           <div className="sequence-list" onDragOver={(event) => event.preventDefault()} onDrop={handleSourceDrop}>
             {sequence.map((item, index) => <div className={`sequence-item${previewPosition === index ? ' is-preview' : ''}${livePosition === index ? ' is-live' : ''}`} key={item.queueId}>
-              <button className="sequence-select" onClick={() => selectPreviewPosition(index)} onDoubleClick={() => sendLive(item, index)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); sendLive(item, index) } }} aria-label={`Preview ${item.title}; press Enter or double-click to send Live`}><span className="sequence-number">{String(index + 1).padStart(2, '0')}</span><span className="sequence-thumb">{item.body.slice(0, 38)}</span><span className="sequence-item-title">{item.title}</span><small>{item.subtitle}</small></button>
+              <button className="sequence-select" onClick={() => selectPreviewPosition(index)} onDoubleClick={() => sendLive(item, index)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); sendLive(item, index) } }} aria-label={`Preview ${item.title}; press Enter or double-click to send Live`}><span className="sequence-number">{String(index + 1).padStart(2, '0')}</span><span className="sequence-thumb">{displayBody(item).slice(0, 38)}</span><span className="sequence-item-title">{item.title}</span><small>{item.subtitle}</small></button>
               <button className="sequence-remove" onClick={() => removeFromSequence(index)} aria-label={`Remove ${item.title} from sequence`}>×</button>
-              <div className="sequence-tools"><button onClick={() => moveSequenceItem(index, -1)} disabled={index === 0} aria-label={`Move ${item.title} up`}>↑</button><button onClick={() => moveSequenceItem(index, 1)} disabled={index === sequence.length - 1} aria-label={`Move ${item.title} down`}>↓</button><button onClick={() => duplicateSequenceItem(index)}>Duplicate</button></div>
+              <div className="sequence-tools"><button onClick={() => beginSlideEdit(index)}>Edit</button><button onClick={() => moveSequenceItem(index, -1)} disabled={index === 0} aria-label={`Move ${item.title} up`}>↑</button><button onClick={() => moveSequenceItem(index, 1)} disabled={index === sequence.length - 1} aria-label={`Move ${item.title} down`}>↓</button><button onClick={() => duplicateSequenceItem(index)}>Duplicate</button></div>
               {livePosition === index && <span className="sequence-live-label">LIVE</span>}{previewPosition === index && <span className="sequence-preview-label">PREVIEW</span>}
             </div>)}
             {sequence.length === 0 && <div className="sequence-empty"><Icon name="plus" size={18} /><strong>Drop items for this show</strong><p>Add Scripture or lyric pages from the content feed below.</p></div>}
@@ -861,7 +893,7 @@ function SavedPresentationsFeed({ presentations, onRefresh, onPreview, onSendLiv
       <section className="saved-presentation-detail" aria-label="Presentation items">
         {busy && <p className="source-error">Loading presentation…</p>}
         {message && <p className="source-error">{message}</p>}
-        {!busy && selectedId !== null && saved?.id === selectedId && <><header><div><strong>{saved.title}</strong><span>{saved.slides.length} slides</span></div><button disabled={!saved.slides.length} onClick={() => onAddMany(saved.slides)}>Add all to show</button></header><div className="saved-presentation-slides">{saved.slides.map((slide, index) => <article key={`${slide.sourceId}-${index}`}><button className="saved-slide-select" onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}><strong>{index + 1}. {slide.title}</strong><span>{slide.kind === 'scripture' || slide.kind === 'lyrics' ? slide.body : slide.kind.toUpperCase()}</span></button><button className="saved-slide-add" aria-label={`Add ${slide.title} to this show`} onClick={() => onAdd(slide)}>＋</button></article>)}</div></>}
+        {!busy && selectedId !== null && saved?.id === selectedId && <><header><div><strong>{saved.title}</strong><span>{saved.slides.length} slides</span></div><button disabled={!saved.slides.length} onClick={() => onAddMany(saved.slides)}>Add all to show</button></header><div className="saved-presentation-slides">{saved.slides.map((slide, index) => <article key={`${slide.sourceId}-${index}`}><button className="saved-slide-select" onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}><strong>{index + 1}. {slide.title}</strong><span>{slide.kind === 'scripture' || slide.kind === 'lyrics' ? displayBody(slide) : slide.kind.toUpperCase()}</span></button><button className="saved-slide-add" aria-label={`Add ${slide.title} to this show`} onClick={() => onAdd(slide)}>＋</button></article>)}</div></>}
         {!busy && selectedId === null && <p className="source-error">Select a saved presentation to browse its slides.</p>}
       </section>
     </div>
@@ -963,7 +995,7 @@ function NextSlidePreview({ slide }: { slide: PresentationSlide }) {
   return <div className="next-slide-preview" role="group" aria-label={`Up next: ${slide.title}`}>
     <span>UP NEXT</span>
     {slide.kind === 'image' && slide.mediaPath ? <img src={convertFileSrc(slide.mediaPath)} alt="" /> : null}
-    <div><strong>{slide.title}</strong><small>{slide.subtitle}</small>{slide.body && <p>{slide.body}</p>}</div>
+    <div><strong>{slide.title}</strong><small>{slide.subtitle}</small>{displayBody(slide) && <p>{displayBody(slide)}</p>}</div>
   </div>
 }
 
@@ -1294,7 +1326,7 @@ function SlideScreen({ slide, cameraStream, playback, onPlaybackTime, emptyLabel
   if (slide.kind === 'live' && slide.liveStreamKind === 'camera') return <article className="operator-screen video-screen"><LiveVideo stream={cameraStream} label="Live camera feed" /></article>
   if (slide.kind === 'live' && slide.liveStreamKind === 'youtube' && slide.youtubeVideoId) return <article className="operator-screen video-screen"><iframe src={youtubeEmbedUrl(slide.youtubeVideoId, true)} title="YouTube Live preview" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article>
   if (slide.kind === 'live' && slide.liveStreamUrl) return <article className="operator-screen video-screen">{slide.liveStreamKind === 'mjpeg' ? <img src={slide.liveStreamUrl} alt="Live MJPEG feed" /> : <video src={slide.liveStreamUrl} autoPlay muted playsInline />}</article>
-  return <article className={`operator-screen ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{slide.subtitle}</span><p>{slide.body}</p><strong>{slide.reference}</strong></article>
+  return <article className={`operator-screen ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{slide.subtitle}</span><p>{displayBody(slide)}</p><strong>{slide.reference}</strong></article>
 }
 
 export function AudienceWindow() {
@@ -1354,7 +1386,7 @@ export function AudienceWindow() {
   }, [cameraSourceId])
 
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><LocalVideo src={snapshot.slide.mediaUrl ?? convertFileSrc(snapshot.slide.mediaPath)} label={snapshot.slide.reference} sourceId={snapshot.slide.sourceId} playback={snapshot.videoPlayback} followPlayback preload="auto" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><LocalVideo src={snapshot.slide.mediaUrl ?? convertFileSrc(snapshot.slide.mediaPath)} label={snapshot.slide.reference} sourceId={snapshot.slide.sourceId} playback={snapshot.videoPlayback} followPlayback preload="auto" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{displayBody(snapshot.slide)}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
   </main>
 }

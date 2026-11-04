@@ -82,7 +82,7 @@ No feature should be marked implemented until it has been tested.
 - [x] Unsaved project changes prompt to save, discard, or stay before leaving, starting a new show, or opening another project.
 - [~] Right-panel controls for clearing Preview/Live content, closing the local Live monitor, and static/scrolling alerts in that monitor.
 - [~] Top toolbar headings for Profile, Edit, View, Settings, Connections, and Plugins; sub-items are placeholders for later design with the user.
-- [ ] Slide editor.
+- [~] Edit show slide titles, subtitles, references/attributions, and Scripture/lyric display text; per-show text overrides are stored separately from imported source content. Desktop review pending.
 - [ ] Slide thumbnails.
 - [~] Preview selection that does not change Live output until explicitly sent.
 - [~] Separate fullscreen Live audience-output window with connected-display selection (desktop verification pending).

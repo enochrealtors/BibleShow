@@ -210,7 +210,7 @@ Do not change working configuration unnecessarily.
 
 The next development sequence is:
 
-1. Windows desktop review of MP4/WebM import, Play/Pause, seeking, Loop, optional Live delay, Preview/Live/audience synchronization, freezing, and the new Up Next card; see `docs/MEDIA_IMPORT_DESIGN.md`.
+1. Windows desktop review of MP4/WebM import, Play/Pause, seeking, Loop, optional Live delay, Preview/Live/audience synchronization, freezing, the Up Next card, and show slide edits; see `docs/MEDIA_IMPORT_DESIGN.md`.
 2. User desktop review of Bible and Lyrics import formats; see `docs/RESOURCE_IMPORT_DESIGN.md`.
 3. Verify Live Feed camera permission and selection, WebRTC audience relay, HTTP(S) video/HLS and MJPEG playback, and RTSP fallback on desktop. Confirm the stream stops and releases the camera cleanly.
 4. After the media and import reviews, continue the remaining presentation/feed plan. NDI® and cross-platform GStreamer packaging remain separate optional adapter decisions. The user has deferred the desktop installer and plans to run the app from the Ubuntu source checkout.
@@ -230,7 +230,7 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** Video playback controls, Preview/Live/audience synchronization, and the Live monitor's compact Up Next card are implemented. The user will do further desktop review on Windows when available; continue implementation while keeping runtime verification pending. Then complete the documented media/resource review sequence. The user is also considering a Windows development checkout; see suggestion S-003 in `docs/PROJECT_SUGGESTIONS.md`.
+**Current restart point:** Video playback controls, Preview/Live/audience synchronization, the Live monitor's compact Up Next card, and a first-pass show slide editor are implemented. The user will do further desktop review on Windows when available; continue implementation while keeping runtime verification pending. Then complete the documented media/resource review sequence. The user is also considering a Windows development checkout; see suggestion S-003 in `docs/PROJECT_SUGGESTIONS.md`.
 
 ### 9. Current session — RTSP Live Feed
 
@@ -288,3 +288,12 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - Updated `docs/FEATURES.md` and the desktop review checklist. Files changed: `src/App.tsx`, `src/App.css`, `docs/FEATURES.md`, and this document.
 - Validation is pending for this session; Windows layout and sequence behavior need user review.
 - Exact next task: continue with the planned presentation workflow, then review video playback and Up Next behavior in the Windows desktop app when available.
+
+### 16. Current session — first show slide editor
+
+- Added an Edit action to current-show slides. Operators can change a slide's title, subtitle, reference/attribution, and Bible/lyric displayed text before taking it Live.
+- Text overrides belong to the presentation slide. They do not modify the installed Bible translation or song library. Reset text to source is available in the editor. Editing a currently previewed item refreshes Preview; Live changes only after the operator sends the edited item Live.
+- Added SQLite schema version 6 with a nullable presentation-item text override and migration from prior libraries. The same field is carried through saved presentations and project JSON import/export.
+- Updated the feature register and database design document. Files changed: `src/App.tsx`, `src/App.css`, `src-tauri/src/lib.rs`, `docs/FEATURES.md`, `docs/DATABASE_DESIGN.md`, and this document.
+- Validation: `npm run lint`, `npm run build`, `cargo check --manifest-path src-tauri/Cargo.toml`, and `git diff --check` passed. Verify editing, reset, save/reopen and JSON round-trip in the Windows desktop app.
+- Exact next task: review this editor on Windows, then continue with Scripture and lyric slide formatting from the presentation design roadmap.
