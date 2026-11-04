@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
 import './App.css'
 
 type Page = 'home' | 'presentation'
 type IconName = 'home' | 'book' | 'screen' | 'search' | 'sun' | 'moon' | 'arrow' | 'plus' | 'spark' | 'clock' | 'settings'
+
+function currentTimeMs() { return Date.now() }
 
 type LibrarySummary = {
   kjv_installed: boolean
@@ -34,7 +36,8 @@ type SongDetail = SongSummary & { copyright: string; themes: string[]; sections:
 type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; translationId?: string; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; mediaUrl?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
 type QueuedSlide = PresentationSlide & { queueId: string }
 type MediaFile = { id: string; filename: string; mediaType: 'image' | 'video'; mimeType: string; localPath: string; fileSize: number; playbackUrl?: string | null }
-type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null }
+type VideoPlayback = { sourceId: string; isPlaying: boolean; loop: boolean; currentTime: number; duration: number; startAtMs: number; updatedAtMs: number; commandId: number }
+type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null; videoPlayback: VideoPlayback | null }
 type DisplaySummary = { index: number; name: string; x: number; y: number; width: number; height: number }
 type PendingProjectAction = { kind: 'leave' } | { kind: 'new' } | { kind: 'open'; id: number }
 type PresentationSummary = { id: number; title: string; updatedAt: string; slideCount: number }
@@ -280,6 +283,9 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [previewSlide, setPreviewSlide] = useState<PresentationSlide | null>(null)
   const [liveSlide, setLiveSlide] = useState<PresentationSlide | null>(null)
+  const [previewPlayback, setPreviewPlayback] = useState<VideoPlayback | null>(null)
+  const [livePlayback, setLivePlayback] = useState<VideoPlayback | null>(null)
+  const [delayLiveVideo, setDelayLiveVideo] = useState(false)
   const [sequence, setSequence] = useState<QueuedSlide[]>([])
   const [previewPosition, setPreviewPosition] = useState<number | null>(null)
   const [livePosition, setLivePosition] = useState<number | null>(null)
@@ -300,11 +306,19 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [alertMode, setAlertMode] = useState<'static' | 'scrolling'>('static')
   const [activeAlert, setActiveAlert] = useState<{ text: string; mode: 'static' | 'scrolling' } | null>(null)
   const hasUnsavedProjectChanges = projectSnapshot(presentationTitle, sequence) !== savedProjectSnapshot
-  const audienceSnapshot = useRef<AudienceSnapshot>({ slide: null, alert: null })
+  const audienceSnapshot = useRef<AudienceSnapshot>({ slide: null, alert: null, videoPlayback: null })
+  const previewPlaybackRef = useRef<VideoPlayback | null>(null)
+  const previewSlideRef = useRef<PresentationSlide | null>(null)
+  const playbackCommandId = useRef(0)
+  const lastLiveSyncAt = useRef(0)
   const activeLiveFeedId = useRef<string | null>(null)
   const cameraPeer = useRef<RTCPeerConnection | null>(null)
-  audienceSnapshot.current = { slide: liveSlide, alert: activeAlert }
-  activeLiveFeedId.current = liveFeedSlide?.sourceId ?? null
+  useEffect(() => {
+    previewPlaybackRef.current = previewPlayback
+    previewSlideRef.current = previewSlide
+    audienceSnapshot.current = { slide: liveSlide, alert: activeAlert, videoPlayback: livePlayback }
+    activeLiveFeedId.current = liveFeedSlide?.sourceId ?? null
+  }, [previewPlayback, previewSlide, liveSlide, activeAlert, livePlayback, liveFeedSlide])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -360,7 +374,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
 
   useEffect(() => {
     if (isTauri()) void emit('bibleshow-live-update', audienceSnapshot.current)
-  }, [liveSlide, activeAlert])
+  }, [liveSlide, livePlayback, activeAlert])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -371,7 +385,11 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
       if (!active || activeLiveFeedId.current !== `live:${streamId}`) return
       setPersistenceMessage(message)
       setLiveFeedSlide(null)
-      setPreviewSlide((current) => current?.sourceId === `live:${streamId}` ? null : current)
+      if (previewSlideRef.current?.sourceId === `live:${streamId}`) {
+        setPreviewSlide(null)
+        setPreviewPosition(null)
+        setPreviewPlayback(null)
+      }
       setLiveSlide((current) => current?.sourceId === `live:${streamId}` ? null : current)
     }).then((stop) => { if (active) unlisten = stop; else stop() }).catch(() => undefined)
     return () => { active = false; unlisten?.() }
@@ -406,7 +424,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
 
   function connectStreamUrl(sourceUrl: string, streamKind: 'video' | 'mjpeg' | 'youtube') {
     const youtubeVideoId = streamKind === 'youtube' ? sourceUrl : undefined
-    const slide: PresentationSlide = { sourceId: `url:${Date.now()}`, title: streamKind === 'youtube' ? 'YouTube Live' : 'Direct Stream', subtitle: streamKind === 'youtube' ? 'YouTube embedded player' : 'Browser-playable stream', body: '', reference: streamKind === 'youtube' ? 'YouTube Live' : 'Direct Stream', kind: 'live', liveStreamUrl: streamKind === 'youtube' ? undefined : sourceUrl, youtubeVideoId, liveStreamKind: streamKind }
+    const slide: PresentationSlide = { sourceId: `url:${currentTimeMs()}`, title: streamKind === 'youtube' ? 'YouTube Live' : 'Direct Stream', subtitle: streamKind === 'youtube' ? 'YouTube embedded player' : 'Browser-playable stream', body: '', reference: streamKind === 'youtube' ? 'YouTube Live' : 'Direct Stream', kind: 'live', liveStreamUrl: streamKind === 'youtube' ? undefined : sourceUrl, youtubeVideoId, liveStreamKind: streamKind }
     setLiveFeedSlide(slide)
     preview(slide)
     setPersistenceMessage('Stream URL staged in Preview. Confirm playback before sending it Live.')
@@ -422,7 +440,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
       cameraStream?.getTracks().forEach((track) => track.stop())
       setCameraStream(null)
       setLiveFeedSlide(null)
-      if (previewSlide?.sourceId === sourceId) { setPreviewSlide(null); setPreviewPosition(null) }
+      if (previewSlideRef.current?.sourceId === sourceId) stagePreview(null, null)
       if (liveSlide?.sourceId === sourceId) { setLiveSlide(null); setLivePosition(null) }
       setPersistenceMessage('Network stream disconnected.')
     } catch (error) { setPersistenceMessage(String(error)) }
@@ -430,18 +448,6 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [bibleSearchMode, setBibleSearchMode] = useState<'reference' | 'keyword'>('reference')
   const [bibleSearchQuery, setBibleSearchQuery] = useState('')
   const [bibleSearchRequest, setBibleSearchRequest] = useState<{ mode: 'reference' | 'keyword'; query: string; id: number } | null>(null)
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Enter' || event.repeat || !previewSlide) return
-      const target = event.target
-      if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
-      event.preventDefault()
-      sendLive(previewSlide, previewPosition)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [previewSlide, previewPosition])
 
   function startPaneResize(event: ReactPointerEvent<HTMLDivElement>, pane: 'left' | 'right' | 'centerTop') {
     event.preventDefault()
@@ -548,8 +554,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
       setPresentationTitle(saved.title)
       setSavedProjectSnapshot(projectSnapshot(saved.title, saved.slides))
       setSequence(items)
-      setPreviewSlide(items[0] ?? null)
-      setPreviewPosition(items.length ? 0 : null)
+      stagePreview(items[0] ?? null, items.length ? 0 : null)
       setLivePosition(null)
       setPersistenceMessage(`Opened “${saved.title}”. Live output was left unchanged.`)
       return true
@@ -605,17 +610,49 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     setPersistenceMessage('Project file exported.')
   }
 
-  function preview(slide: PresentationSlide) {
+  function stagePreview(slide: PresentationSlide | null, position: number | null) {
     setPreviewSlide(slide)
-    setPreviewPosition(null)
+    setPreviewPosition(position)
+    if (slide?.kind === 'video') {
+      const nextPlayback = makeVideoPlayback(slide.sourceId, 0, true, true, currentTimeMs())
+      setPreviewPlayback((current) => current?.sourceId === slide.sourceId ? current : nextPlayback)
+    } else {
+      setPreviewPlayback(null)
+    }
+  }
+
+  function preview(slide: PresentationSlide) {
+    stagePreview(slide, null)
+  }
+
+  function makeVideoPlayback(sourceId: string, currentTime: number, isPlaying: boolean, loop: boolean, startAtMs: number): VideoPlayback {
+    playbackCommandId.current += 1
+    return { sourceId, currentTime, isPlaying, loop, duration: 0, startAtMs, updatedAtMs: currentTimeMs(), commandId: playbackCommandId.current }
+  }
+
+  function changeVideoPlayback(target: 'preview' | 'live', sourceId: string, patch: Partial<VideoPlayback>, command = true) {
+    const setter = target === 'preview' ? setPreviewPlayback : setLivePlayback
+    setter((current) => {
+      if (!current || current.sourceId !== sourceId) return current
+      playbackCommandId.current += command ? 1 : 0
+      return { ...current, ...patch, updatedAtMs: Date.now(), commandId: command ? playbackCommandId.current : current.commandId }
+    })
+  }
+
+  function handleVideoTime(target: 'preview' | 'live', sourceId: string, currentTime: number, duration: number) {
+    if (target === 'live') {
+      const now = Date.now()
+      if (now - lastLiveSyncAt.current < 300) return
+      lastLiveSyncAt.current = now
+    }
+    changeVideoPlayback(target, sourceId, { currentTime, duration }, false)
   }
 
   function addToSequence(slide: PresentationSlide) {
     const item = { ...slide, queueId: crypto.randomUUID() }
     const position = sequence.length
     setSequence((items) => [...items, item])
-    setPreviewSlide(item)
-    setPreviewPosition(position)
+    stagePreview(item, position)
   }
 
   function addManyToSequence(slides: PresentationSlide[]) {
@@ -623,15 +660,13 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     const items = slides.map((slide) => ({ ...slide, queueId: crypto.randomUUID() }))
     const position = sequence.length
     setSequence((current) => [...current, ...items])
-    setPreviewSlide(items[0])
-    setPreviewPosition(position)
+    stagePreview(items[0], position)
   }
 
   function selectPreviewPosition(position: number) {
     const item = sequence[position]
     if (!item) return
-    setPreviewSlide(item)
-    setPreviewPosition(position)
+    stagePreview(item, position)
   }
 
   function movePreview(direction: -1 | 1) {
@@ -640,11 +675,30 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
     selectPreviewPosition(Math.max(0, Math.min(sequence.length - 1, current + direction)))
   }
 
-  function sendLive(slide: PresentationSlide, position: number | null) {
+  const sendLive = useCallback((slide: PresentationSlide, position: number | null) => {
+    if (slide.kind === 'video') {
+      const previewState = previewPlaybackRef.current?.sourceId === slide.sourceId ? previewPlaybackRef.current : null
+      const startAtMs = currentTimeMs() + (delayLiveVideo ? 1000 : 0)
+      setLivePlayback(makeVideoPlayback(slide.sourceId, previewState?.currentTime ?? 0, previewState?.isPlaying ?? true, previewState?.loop ?? true, startAtMs))
+    } else {
+      setLivePlayback(null)
+    }
     setLiveSlide(slide)
     setLivePosition(position)
     setLiveDisplayOpen(true)
-  }
+  }, [delayLiveVideo])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.repeat || !previewSlide) return
+      const target = event.target
+      if (target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      event.preventDefault()
+      sendLive(previewSlide, previewPosition)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [previewSlide, previewPosition, sendLive])
 
   function moveLive(direction: -1 | 1) {
     if (!sequence.length) return
@@ -656,8 +710,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   function removeFromSequence(position: number) {
     setSequence((items) => items.filter((_, index) => index !== position))
     if (previewPosition === position) {
-      setPreviewSlide(null)
-      setPreviewPosition(null)
+      stagePreview(null, null)
     } else if (previewPosition !== null && previewPosition > position) setPreviewPosition(previewPosition - 1)
     if (livePosition === position) setLivePosition(null)
     else if (livePosition !== null && livePosition > position) setLivePosition(livePosition - 1)
@@ -688,8 +741,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
 
   function clearSequence() {
     setSequence([])
-    setPreviewSlide(null)
-    setPreviewPosition(null)
+    stagePreview(null, null)
     setLivePosition(null)
   }
 
@@ -733,8 +785,8 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
         <main className="operator-center">
           <section className="operator-display-area">
             <div className="operator-monitors">
-              <MonitorPanel type="preview" slide={previewSlide} cameraStream={cameraStream} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} canNavigate={sequence.length > 0} onAction={() => previewSlide && sendLive(previewSlide, previewPosition)} />
-              <MonitorPanel type="live" slide={liveDisplayOpen ? liveSlide : null} cameraStream={cameraStream} alert={liveDisplayOpen ? activeAlert : null} onPrevious={() => moveLive(-1)} onNext={() => moveLive(1)} canNavigate={sequence.length > 0} onAction={() => moveLive(1)} emptyLabel={liveDisplayOpen ? 'Nothing live yet' : 'Live display is closed'} />
+              <MonitorPanel type="preview" slide={previewSlide} cameraStream={cameraStream} playback={previewPlayback} delayLiveVideo={delayLiveVideo} onDelayLiveVideoChange={setDelayLiveVideo} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('preview', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('preview', sourceId, currentTime, duration)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} canNavigate={sequence.length > 0} onAction={() => previewSlide && sendLive(previewSlide, previewPosition)} />
+              <MonitorPanel type="live" slide={liveDisplayOpen ? liveSlide : null} cameraStream={cameraStream} playback={livePlayback} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('live', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('live', sourceId, currentTime, duration)} alert={liveDisplayOpen ? activeAlert : null} onPrevious={() => moveLive(-1)} onNext={() => moveLive(1)} canNavigate={sequence.length > 0} onAction={() => moveLive(1)} emptyLabel={liveDisplayOpen ? 'Nothing live yet' : 'Live display is closed'} />
             </div>
             <form className="operator-status bible-search-bar" onSubmit={(event) => { event.preventDefault(); if (bibleSearchQuery.trim()) { setActiveFeed('bible'); setBibleSearchRequest({ mode: bibleSearchMode, query: bibleSearchQuery.trim(), id: Date.now() }) } }}>
               <Icon name="search" size={17} />
@@ -766,7 +818,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
 
         <aside className="operator-display-controls operator-pane">
           <header className="pane-heading"><div><strong>Display controls</strong><small>{liveDisplayOpen ? 'Local Live monitor ready' : 'Local Live monitor closed'}</small></div><span className={liveDisplayOpen ? 'display-ready-dot' : 'display-closed-dot'} /></header>
-          <section className="display-control-group"><h3>Clear items</h3><button onClick={() => { setPreviewSlide(null); setPreviewPosition(null) }} disabled={!previewSlide}>Clear Preview</button><button onClick={() => { setLiveSlide(null); setLivePosition(null) }} disabled={!liveSlide}>Clear Live content</button><button onClick={() => setLiveDisplayOpen(false)} disabled={!liveDisplayOpen}>Hide operator Live monitor</button><button onClick={() => setLiveDisplayOpen(true)} disabled={liveDisplayOpen}>Show operator Live monitor</button></section>
+          <section className="display-control-group"><h3>Clear items</h3><button onClick={() => stagePreview(null, null)} disabled={!previewSlide}>Clear Preview</button><button onClick={() => { setLiveSlide(null); setLivePosition(null); setLivePlayback(null) }} disabled={!liveSlide}>Clear Live content</button><button onClick={() => setLiveDisplayOpen(false)} disabled={!liveDisplayOpen}>Hide operator Live monitor</button><button onClick={() => setLiveDisplayOpen(true)} disabled={liveDisplayOpen}>Show operator Live monitor</button></section>
           <section className="display-control-group"><h3>Audience output</h3><label>Display<select value={selectedDisplay} onChange={(event) => setSelectedDisplay(event.target.value)} disabled={audienceWindowOpen || !displays.length}><option value="">Select a display</option>{displays.map((display) => <option key={display.index} value={display.index}>{display.name} · {display.width} × {display.height}</option>)}</select></label><button className="save-presentation-button" onClick={() => void toggleAudienceWindow(true)} disabled={audienceWindowOpen || selectedDisplay === ''}>Open fullscreen output</button><button className="display-close-button" onClick={() => void toggleAudienceWindow(false)} disabled={!audienceWindowOpen}>Close audience output</button><small>{audienceWindowOpen ? 'Live slides are mirrored to this display.' : 'Choose the screen for the audience display.'}</small></section>
           <section className="display-control-group"><h3>Message alert</h3><label>Message<textarea value={alertDraft} onChange={(event) => setAlertDraft(event.target.value)} placeholder="Type a message for the audience" rows={3} /></label><label>Display style<select value={alertMode} onChange={(event) => setAlertMode(event.target.value as 'static' | 'scrolling')}><option value="static">Static</option><option value="scrolling">Scrolling</option></select></label><div className="alert-actions"><button className="save-presentation-button" onClick={() => alertDraft.trim() && setActiveAlert({ text: alertDraft.trim(), mode: alertMode })} disabled={!alertDraft.trim() || !liveDisplayOpen}>Show alert</button><button onClick={() => setActiveAlert(null)} disabled={!activeAlert}>Clear alert</button></div></section>
           {activeAlert && <p className="alert-live-status" role="status">{activeAlert.mode === 'scrolling' ? 'Scrolling' : 'Static'} alert is on Live.</p>}
@@ -886,12 +938,14 @@ function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, sli
   </section>
 }
 
-function MonitorPanel({ type, slide, cameraStream, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; cameraStream: MediaStream | null; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
+function MonitorPanel({ type, slide, cameraStream, playback, delayLiveVideo = false, onDelayLiveVideoChange, onPlaybackCommand, onPlaybackTime, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; cameraStream: MediaStream | null; playback: VideoPlayback | null; delayLiveVideo?: boolean; onDelayLiveVideoChange?: (value: boolean) => void; onPlaybackCommand: (sourceId: string, patch: Partial<VideoPlayback>) => void; onPlaybackTime: (sourceId: string, currentTime: number, duration: number) => void; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
   const isPreview = type === 'preview'
+  const localPlayback = slide?.kind === 'video' && playback?.sourceId === slide.sourceId ? playback : null
   return (
     <section className={`monitor-panel ${isPreview ? 'monitor-preview' : 'monitor-live'}`}>
       <header className="monitor-heading"><div><span className={`monitor-light ${isPreview ? 'is-preview' : slide ? 'is-live' : ''}`} /><strong>{isPreview ? 'PREVIEW' : 'LIVE'}</strong></div><small>{isPreview ? 'Operator selection' : 'Local Live monitor'}</small></header>
-      <div className="monitor-screen-wrap"><SlideScreen slide={slide} cameraStream={cameraStream} emptyLabel={emptyLabel ?? (isPreview ? 'Choose content to preview' : 'Nothing live yet')} />{!isPreview && alert && <div className={`display-alert ${alert.mode}`}><span>{alert.text}</span></div>}</div>
+      <div className="monitor-screen-wrap"><SlideScreen slide={slide} cameraStream={cameraStream} playback={localPlayback} onPlaybackTime={onPlaybackTime} emptyLabel={emptyLabel ?? (isPreview ? 'Choose content to preview' : 'Nothing live yet')} />{!isPreview && alert && <div className={`display-alert ${alert.mode}`}><span>{alert.text}</span></div>}</div>
+      {slide?.kind === 'video' && localPlayback && <VideoTransport playback={localPlayback} showDelay={isPreview} delayLiveVideo={delayLiveVideo} onDelayLiveVideoChange={onDelayLiveVideoChange} onCommand={(patch) => onPlaybackCommand(slide.sourceId, patch)} />}
       <footer className="monitor-controls">
         <button onClick={onPrevious} disabled={!canNavigate} aria-label={`Previous ${type} page`}>‹</button>
         {isPreview && <button className="take-live-button" onClick={onAction} disabled={!slide}>Take Live</button>}
@@ -900,6 +954,25 @@ function MonitorPanel({ type, slide, cameraStream, alert, emptyLabel, onPrevious
       </footer>
     </section>
   )
+}
+
+function VideoTransport({ playback, showDelay, delayLiveVideo, onDelayLiveVideoChange, onCommand }: { playback: VideoPlayback; showDelay: boolean; delayLiveVideo: boolean; onDelayLiveVideoChange?: (value: boolean) => void; onCommand: (patch: Partial<VideoPlayback>) => void }) {
+  const seekable = playback.duration > 0 && Number.isFinite(playback.duration)
+  const changePosition = (value: number) => onCommand({ currentTime: value, startAtMs: Date.now() })
+  return <div className="video-transport" aria-label="Video playback controls">
+    <button type="button" onClick={() => onCommand({ isPlaying: !playback.isPlaying, startAtMs: Date.now() })} aria-label={playback.isPlaying ? 'Pause video' : 'Play video'}>{playback.isPlaying ? 'Pause' : 'Play'}</button>
+    <span className="video-time">{formatVideoTime(playback.currentTime)}</span>
+    <input type="range" min="0" max={seekable ? playback.duration : 0} step="0.1" value={seekable ? Math.min(playback.currentTime, playback.duration) : 0} disabled={!seekable} aria-label="Seek video playback" onChange={(event) => changePosition(Number(event.target.value))} />
+    <span className="video-time">{formatVideoTime(playback.duration)}</span>
+    <button type="button" className={playback.loop ? 'is-selected' : ''} aria-pressed={playback.loop} onClick={() => onCommand({ loop: !playback.loop })}>Loop</button>
+    {showDelay && <label className="video-delay-toggle"><input type="checkbox" checked={delayLiveVideo} onChange={(event) => onDelayLiveVideoChange?.(event.target.checked)} />1s Live delay</label>}
+  </div>
+}
+
+function formatVideoTime(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00'
+  const wholeSeconds = Math.floor(seconds)
+  return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, '0')}`
 }
 
 function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSourceId, searchRequest }: { onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onAdd: (slide: PresentationSlide) => void; onAddMany: (slides: PresentationSlide[]) => void; previewSourceId: string | null; searchRequest: { mode: 'reference' | 'keyword'; query: string; id: number } | null }) {
@@ -1137,18 +1210,76 @@ function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { 
   </div>
 }
 
-function LocalVideo({ src, label, autoPlay = false, loop = false, preload = 'metadata' }: { src: string; label: string; autoPlay?: boolean; loop?: boolean; preload?: 'none' | 'metadata' | 'auto' }) {
+function LocalVideo({ src, label, sourceId, playback, onPlaybackTime, followPlayback = false, preload = 'metadata' }: { src: string; label: string; sourceId?: string; playback?: VideoPlayback | null; onPlaybackTime?: (currentTime: number, duration: number) => void; followPlayback?: boolean; preload?: 'none' | 'metadata' | 'auto' }) {
   const [failed, setFailed] = useState(false)
-  return <div className={`local-video-frame${failed ? ' has-error' : ''}`}>
-    <video src={src} aria-label={label} autoPlay={autoPlay} loop={loop} muted playsInline preload={preload} onError={() => setFailed(true)} onCanPlay={() => setFailed(false)} />
+  const [buffering, setBuffering] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const playbackRef = useRef(playback)
+  const applyPlaybackRef = useRef<() => void>(() => undefined)
+  const playTimer = useRef<number | null>(null)
+  useEffect(() => {
+    playbackRef.current = playback
+    applyPlaybackRef.current = () => {
+      const video = videoRef.current
+      const state = playbackRef.current
+      if (!video) return
+      if (!state || (sourceId && state.sourceId !== sourceId)) { video.pause(); return }
+      video.loop = state.loop
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA && Math.abs(video.currentTime - state.currentTime) > 0.35) {
+        try { video.currentTime = state.currentTime } catch { /* The browser will sync after metadata loads. */ }
+      }
+      if (playTimer.current !== null) window.clearTimeout(playTimer.current)
+      playTimer.current = null
+      if (!state.isPlaying) { video.pause(); return }
+      const delay = state.startAtMs - Date.now()
+      if (delay > 0) {
+        video.pause()
+        playTimer.current = window.setTimeout(() => { void video.play().catch(() => setFailed(true)) }, delay)
+      } else {
+        void video.play().catch(() => setFailed(true))
+      }
+    }
+  }, [playback, sourceId])
+
+  useEffect(() => {
+    applyPlaybackRef.current()
+    return () => { if (playTimer.current !== null) window.clearTimeout(playTimer.current) }
+  }, [src, playback?.sourceId, playback?.commandId])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!followPlayback || !video || !playback || playback.sourceId !== sourceId || !playback.isPlaying || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
+    const anchor = Math.max(playback.updatedAtMs, playback.startAtMs)
+    let expectedTime = playback.currentTime + Math.max(0, Date.now() - anchor) / 1000
+    if (playback.loop && playback.duration > 0) expectedTime %= playback.duration
+    else if (playback.duration > 0) expectedTime = Math.min(expectedTime, playback.duration)
+    if (Math.abs(video.currentTime - expectedTime) > 0.65) {
+      try { video.currentTime = expectedTime } catch { /* The next sync update can retry. */ }
+    }
+  }, [followPlayback, playback, playback?.sourceId, playback?.currentTime, playback?.updatedAtMs, playback?.startAtMs, playback?.isPlaying, playback?.loop, playback?.duration, sourceId])
+
+  function reportTime(video: HTMLVideoElement) {
+    if (onPlaybackTime && playback?.sourceId === sourceId) onPlaybackTime(video.currentTime, Number.isFinite(video.duration) ? video.duration : 0)
+  }
+
+  function loaded() {
+    setFailed(false)
+    applyPlaybackRef.current()
+    const video = videoRef.current
+    if (video) reportTime(video)
+  }
+
+  return <div className={`local-video-frame${failed ? ' has-error' : ''}${buffering ? ' is-buffering' : ''}`}>
+    <video ref={videoRef} src={src} aria-label={label} muted playsInline preload={preload} onError={() => { setFailed(true); setBuffering(false) }} onLoadedMetadata={loaded} onCanPlay={() => { setBuffering(false); loaded() }} onWaiting={() => setBuffering(true)} onStalled={() => setBuffering(true)} onPlaying={() => { setBuffering(false); setFailed(false) }} onTimeUpdate={(event) => reportTime(event.currentTarget)} />
+    {buffering && !failed && <span role="status">Buffering video…</span>}
     {failed && <span role="status">This video could not be loaded or decoded by the current desktop webview.</span>}
   </div>
 }
 
-function SlideScreen({ slide, cameraStream, emptyLabel }: { slide: PresentationSlide | null; cameraStream: MediaStream | null; emptyLabel: string }) {
+function SlideScreen({ slide, cameraStream, playback, onPlaybackTime, emptyLabel }: { slide: PresentationSlide | null; cameraStream: MediaStream | null; playback: VideoPlayback | null; onPlaybackTime: (sourceId: string, currentTime: number, duration: number) => void; emptyLabel: string }) {
   if (!slide) return <div className="operator-screen is-empty"><div><Icon name="screen" size={23} /><span>{emptyLabel}</span></div></div>
   if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /><strong>{slide.reference}</strong></article>
-  if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><LocalVideo src={slide.mediaUrl ?? convertFileSrc(slide.mediaPath)} label={slide.reference} autoPlay loop /><strong>{slide.reference}</strong></article>
+  if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><LocalVideo src={slide.mediaUrl ?? convertFileSrc(slide.mediaPath)} label={slide.reference} sourceId={slide.sourceId} playback={playback} onPlaybackTime={(currentTime, duration) => onPlaybackTime(slide.sourceId, currentTime, duration)} preload="auto" /><strong>{slide.reference}</strong></article>
   if (slide.kind === 'live' && slide.liveStreamKind === 'camera') return <article className="operator-screen video-screen"><LiveVideo stream={cameraStream} label="Live camera feed" /></article>
   if (slide.kind === 'live' && slide.liveStreamKind === 'youtube' && slide.youtubeVideoId) return <article className="operator-screen video-screen"><iframe src={youtubeEmbedUrl(slide.youtubeVideoId, true)} title="YouTube Live preview" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article>
   if (slide.kind === 'live' && slide.liveStreamUrl) return <article className="operator-screen video-screen">{slide.liveStreamKind === 'mjpeg' ? <img src={slide.liveStreamUrl} alt="Live MJPEG feed" /> : <video src={slide.liveStreamUrl} autoPlay muted playsInline />}</article>
@@ -1156,7 +1287,7 @@ function SlideScreen({ slide, cameraStream, emptyLabel }: { slide: PresentationS
 }
 
 export function AudienceWindow() {
-  const [snapshot, setSnapshot] = useState<AudienceSnapshot>({ slide: null, alert: null })
+  const [snapshot, setSnapshot] = useState<AudienceSnapshot>({ slide: null, alert: null, videoPlayback: null })
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const audiencePeer = useRef<RTCPeerConnection | null>(null)
   const cameraSourceId = snapshot.slide?.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? snapshot.slide.sourceId : null
@@ -1212,7 +1343,7 @@ export function AudienceWindow() {
   }, [cameraSourceId])
 
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><LocalVideo src={snapshot.slide.mediaUrl ?? convertFileSrc(snapshot.slide.mediaPath)} label={snapshot.slide.reference} autoPlay loop preload="auto" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><LocalVideo src={snapshot.slide.mediaUrl ?? convertFileSrc(snapshot.slide.mediaPath)} label={snapshot.slide.reference} sourceId={snapshot.slide.sourceId} playback={snapshot.videoPlayback} followPlayback preload="auto" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`}><span>{snapshot.slide.subtitle}</span><p>{snapshot.slide.body}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
   </main>
 }

@@ -210,10 +210,10 @@ Do not change working configuration unnecessarily.
 
 The next development sequence is:
 
-1. User desktop review of MP4/WebM upload, playback, Preview/Live, and saved-media slides; see `docs/MEDIA_IMPORT_DESIGN.md`.
-2. User desktop review of the new Bible and Lyrics import formats; see `docs/RESOURCE_IMPORT_DESIGN.md`.
+1. User desktop review of MP4/WebM import, Play/Pause, seeking, Loop, optional Live delay, Preview/Live/audience synchronization, and freezing under normal use; see `docs/MEDIA_IMPORT_DESIGN.md`.
+2. User desktop review of Bible and Lyrics import formats; see `docs/RESOURCE_IMPORT_DESIGN.md`.
 3. Verify Live Feed camera permission and selection, WebRTC audience relay, HTTP(S) video/HLS and MJPEG playback, and RTSP fallback on desktop. Confirm the stream stops and releases the camera cleanly.
-4. Continue broader display, rights and remaining feed work. NDI® and cross-platform GStreamer packaging remain separate optional adapter decisions. The user has deferred the desktop installer and plans to run the app from the Ubuntu source checkout.
+4. After the media and import reviews, continue the remaining presentation/feed plan. NDI® and cross-platform GStreamer packaging remain separate optional adapter decisions. The user has deferred the desktop installer and plans to run the app from the Ubuntu source checkout.
 
 Do not jump ahead to advanced AI or cloud functionality.
 
@@ -230,7 +230,7 @@ Whenever a development session ends, update this document with:
 
 A new development session must read this document and PROJECT_GUIDE.md before modifying the application.
 
-**Current restart point:** The user has deferred desktop packaging and will review the app with `cargo tauri dev`. Prioritize their reported media playback problem, then continue the documented media/resource roadmap. The user is also considering a Windows development checkout; see suggestion S-003 in `docs/PROJECT_SUGGESTIONS.md`.
+**Current restart point:** Video playback controls and Preview/Live/audience synchronization are implemented. The user should verify them in the Ubuntu desktop app with `cargo tauri dev`, especially whether the reported freezing is resolved. Then continue the documented media/resource review sequence. The user is also considering a Windows development checkout; see suggestion S-003 in `docs/PROJECT_SUGGESTIONS.md`.
 
 ### 9. Current session — RTSP Live Feed
 
@@ -271,3 +271,12 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - The Ubuntu trial workflow failed before packaging because Tauri rejects the default `com.tauri.dev` bundle identifier.
 - Changed the application identifier to `com.enochrealtors.bibleshow`.
 - Kept Tauri's app data directory mapped to the existing `com.tauri.dev` data folder so changing the identifier does not hide an existing local Bible/lyrics library or media files. Revisit this transitional mapping only with an explicit data migration plan.
+
+### 14. Current session — video playback controls and synchronization
+
+- Added Play/Pause, a seek bar with current and total time, and a Loop toggle under video Preview and Live monitors.
+- Added an optional one-second delay for starting Live video. When a video is sent Live, its playback position and play/pause/loop state are copied from Preview; audience output follows Live playback and corrects noticeable drift.
+- Reduced independent playback state drift by synchronizing the operator monitors and audience window, preloading monitor videos, and showing a buffering indicator. This is a mitigation, not a confirmed fix for all stutter: real playback smoothness depends on the desktop WebView, codec, and media device and must be reviewed in the Ubuntu app.
+- Updated the media guide, feature list and desktop review checklist. Files changed: `src/App.tsx`, `src/App.css`, `docs/MEDIA_IMPORT_DESIGN.md`, `docs/FEATURES.md`, and this document.
+- Validation is pending for this session. No desktop app or representative video files were available for runtime review here.
+- Exact next task: run `cargo tauri dev`, exercise the playback controls and delay with an imported MP4/WebM, note whether freezing persists, then continue the media/resource review sequence above.

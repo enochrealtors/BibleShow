@@ -139,11 +139,10 @@ The requested four-area layout, project/show workflow, content feed categories, 
 - [ ] Playlist audio support.
 
 ## Video
-- [ ] Video import.
-- [ ] Video playback.
+- [x] Local MP4/WebM import and playback in the Videos / Images feed, Preview, Live and audience output (desktop codec verification pending).
 - [ ] Fullscreen video.
 - [ ] Video backgrounds.
-- [ ] Video controls.
+- [x] Play, pause, seek and loop controls; optional one-second Live start delay and audience playback synchronization (desktop smoothness verification pending).
 
 ## Documents and external media
 - [ ] PDF import.
