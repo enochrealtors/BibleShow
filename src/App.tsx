@@ -305,6 +305,8 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [alertDraft, setAlertDraft] = useState('')
   const [alertMode, setAlertMode] = useState<'static' | 'scrolling'>('static')
   const [activeAlert, setActiveAlert] = useState<{ text: string; mode: 'static' | 'scrolling' } | null>(null)
+  const liveSequenceIndex = livePosition ?? (liveSlide ? sequence.findIndex((item) => item.sourceId === liveSlide.sourceId) : -1)
+  const nextSlide = liveSequenceIndex >= 0 ? sequence[liveSequenceIndex + 1] ?? null : sequence[0] ?? null
   const hasUnsavedProjectChanges = projectSnapshot(presentationTitle, sequence) !== savedProjectSnapshot
   const audienceSnapshot = useRef<AudienceSnapshot>({ slide: null, alert: null, videoPlayback: null })
   const previewPlaybackRef = useRef<VideoPlayback | null>(null)
@@ -786,7 +788,7 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
           <section className="operator-display-area">
             <div className="operator-monitors">
               <MonitorPanel type="preview" slide={previewSlide} cameraStream={cameraStream} playback={previewPlayback} delayLiveVideo={delayLiveVideo} onDelayLiveVideoChange={setDelayLiveVideo} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('preview', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('preview', sourceId, currentTime, duration)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} canNavigate={sequence.length > 0} onAction={() => previewSlide && sendLive(previewSlide, previewPosition)} />
-              <MonitorPanel type="live" slide={liveDisplayOpen ? liveSlide : null} cameraStream={cameraStream} playback={livePlayback} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('live', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('live', sourceId, currentTime, duration)} alert={liveDisplayOpen ? activeAlert : null} onPrevious={() => moveLive(-1)} onNext={() => moveLive(1)} canNavigate={sequence.length > 0} onAction={() => moveLive(1)} emptyLabel={liveDisplayOpen ? 'Nothing live yet' : 'Live display is closed'} />
+              <MonitorPanel type="live" slide={liveDisplayOpen ? liveSlide : null} nextSlide={liveDisplayOpen ? nextSlide : null} cameraStream={cameraStream} playback={livePlayback} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('live', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('live', sourceId, currentTime, duration)} alert={liveDisplayOpen ? activeAlert : null} onPrevious={() => moveLive(-1)} onNext={() => moveLive(1)} canNavigate={sequence.length > 0} onAction={() => moveLive(1)} emptyLabel={liveDisplayOpen ? 'Nothing live yet' : 'Live display is closed'} />
             </div>
             <form className="operator-status bible-search-bar" onSubmit={(event) => { event.preventDefault(); if (bibleSearchQuery.trim()) { setActiveFeed('bible'); setBibleSearchRequest({ mode: bibleSearchMode, query: bibleSearchQuery.trim(), id: Date.now() }) } }}>
               <Icon name="search" size={17} />
@@ -938,7 +940,7 @@ function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, sli
   </section>
 }
 
-function MonitorPanel({ type, slide, cameraStream, playback, delayLiveVideo = false, onDelayLiveVideoChange, onPlaybackCommand, onPlaybackTime, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; cameraStream: MediaStream | null; playback: VideoPlayback | null; delayLiveVideo?: boolean; onDelayLiveVideoChange?: (value: boolean) => void; onPlaybackCommand: (sourceId: string, patch: Partial<VideoPlayback>) => void; onPlaybackTime: (sourceId: string, currentTime: number, duration: number) => void; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
+function MonitorPanel({ type, slide, nextSlide = null, cameraStream, playback, delayLiveVideo = false, onDelayLiveVideoChange, onPlaybackCommand, onPlaybackTime, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; nextSlide?: PresentationSlide | null; cameraStream: MediaStream | null; playback: VideoPlayback | null; delayLiveVideo?: boolean; onDelayLiveVideoChange?: (value: boolean) => void; onPlaybackCommand: (sourceId: string, patch: Partial<VideoPlayback>) => void; onPlaybackTime: (sourceId: string, currentTime: number, duration: number) => void; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
   const isPreview = type === 'preview'
   const localPlayback = slide?.kind === 'video' && playback?.sourceId === slide.sourceId ? playback : null
   return (
@@ -946,6 +948,7 @@ function MonitorPanel({ type, slide, cameraStream, playback, delayLiveVideo = fa
       <header className="monitor-heading"><div><span className={`monitor-light ${isPreview ? 'is-preview' : slide ? 'is-live' : ''}`} /><strong>{isPreview ? 'PREVIEW' : 'LIVE'}</strong></div><small>{isPreview ? 'Operator selection' : 'Local Live monitor'}</small></header>
       <div className="monitor-screen-wrap"><SlideScreen slide={slide} cameraStream={cameraStream} playback={localPlayback} onPlaybackTime={onPlaybackTime} emptyLabel={emptyLabel ?? (isPreview ? 'Choose content to preview' : 'Nothing live yet')} />{!isPreview && alert && <div className={`display-alert ${alert.mode}`}><span>{alert.text}</span></div>}</div>
       {slide?.kind === 'video' && localPlayback && <VideoTransport playback={localPlayback} showDelay={isPreview} delayLiveVideo={delayLiveVideo} onDelayLiveVideoChange={onDelayLiveVideoChange} onCommand={(patch) => onPlaybackCommand(slide.sourceId, patch)} />}
+      {!isPreview && nextSlide && <NextSlidePreview slide={nextSlide} />}
       <footer className="monitor-controls">
         <button onClick={onPrevious} disabled={!canNavigate} aria-label={`Previous ${type} page`}>‹</button>
         {isPreview && <button className="take-live-button" onClick={onAction} disabled={!slide}>Take Live</button>}
@@ -954,6 +957,14 @@ function MonitorPanel({ type, slide, cameraStream, playback, delayLiveVideo = fa
       </footer>
     </section>
   )
+}
+
+function NextSlidePreview({ slide }: { slide: PresentationSlide }) {
+  return <div className="next-slide-preview" role="group" aria-label={`Up next: ${slide.title}`}>
+    <span>UP NEXT</span>
+    {slide.kind === 'image' && slide.mediaPath ? <img src={convertFileSrc(slide.mediaPath)} alt="" /> : null}
+    <div><strong>{slide.title}</strong><small>{slide.subtitle}</small>{slide.body && <p>{slide.body}</p>}</div>
+  </div>
 }
 
 function VideoTransport({ playback, showDelay, delayLiveVideo, onDelayLiveVideoChange, onCommand }: { playback: VideoPlayback; showDelay: boolean; delayLiveVideo: boolean; onDelayLiveVideoChange?: (value: boolean) => void; onCommand: (patch: Partial<VideoPlayback>) => void }) {
