@@ -306,3 +306,12 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - Validation passed: npm run lint, TypeScript checks for app and node configs, Vite production build to a scratch directory, Windows cargo check, and git diff --check. No test suites were run.
 - No real RTSP source was available. Actual stream playback, Preview/audience runtime behavior, and portable Windows GStreamer packaging remain unverified.
 - Exact next task: smoke-check RTSP/RTSPS connection, disconnect and source-loss recovery in the desktop app with a real source; then document the Windows runtime packaging requirements. NDI remains a separate follow-on after SDK distribution review.
+
+### 18. Current session - projector and library import fixes
+
+- Changed audience output to use Tauri fullscreen-on-monitor targeting for the selected display. This is compile-checked; an external-screen desktop review is still needed.
+- Added BibleShow simple Bible XML parsing, including the XML schema used by the starter KJV package, and allowed KJV as a translation code.
+- Removed arbitrary lyrics count and per-file size limits. Lyrics now upload one file per request so large collections do not need one oversized JSON payload; partial successes remain available if a later file fails.
+- Added Bible and Lyrics import controls to their respective Presentation feeds and refreshes the source lists after import.
+- Validation passed: lint, TypeScript, frontend build, Rust compile, and diff checks. `rustfmt --check` flags broad formatting differences across both existing Rust files; no whole-file reformat was applied. No test suites were run.
+- Runtime review is still needed for external-screen placement and representative Bible/lyrics XML files.

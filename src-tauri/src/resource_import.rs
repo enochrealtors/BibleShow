@@ -94,11 +94,30 @@ pub fn parse_bible_files(files: &[(String, String)]) -> Result<Vec<ParsedBibleBo
 fn parse_bible_xml(source: &str) -> Result<Vec<(i64, BookBuilder)>, String> {
     let doc = Document::parse(source).map_err(|_| "The selected XML Bible file is malformed.".to_string())?;
     match doc.root_element().tag_name().name().to_ascii_lowercase().as_str() {
+        "bible" => parse_simple_bible(&doc),
         "xmlbible" => parse_zefania(&doc),
         "osis" | "osistxt" => parse_osis(&doc),
         "usx" => parse_usx(&doc),
-        _ => Err("The XML is not recognized as USX, OSIS, or Zefania Bible data.".into()),
+        _ => Err("The XML is not recognized as BibleShow Bible, USX, OSIS, or Zefania data.".into()),
     }
+}
+
+fn parse_simple_bible(doc: &Document<'_>) -> Result<Vec<(i64, BookBuilder)>, String> {
+    let books = doc.root_element().descendants().filter(|node| node.has_tag_name("book")).map(|node| {
+        let number = node.attribute("number").and_then(|value| value.parse::<i64>().ok()).filter(|value| (1..=66).contains(value)).ok_or("A Bible book has an invalid number.")?;
+        let mut book = BookBuilder { name: BOOK_NAMES[number as usize - 1].to_string(), ..Default::default() };
+        for chapter_node in node.children().filter(|child| child.has_tag_name("chapter")) {
+            let chapter = chapter_node.attribute("number").and_then(|value| value.parse::<i64>().ok()).filter(|value| *value > 0).ok_or("A Bible chapter has an invalid number.")?;
+            for verse_node in chapter_node.children().filter(|child| child.has_tag_name("verse")) {
+                let verse = verse_node.attribute("number").and_then(|value| value.parse::<i64>().ok()).filter(|value| *value > 0).ok_or("A Bible verse has an invalid number.")?;
+                let text = xml_text(verse_node).trim().to_string();
+                if !text.is_empty() { insert_verse(&mut book, chapter, verse, text)?; }
+            }
+        }
+        Ok((number, book))
+    }).collect::<Result<Vec<_>, String>>()?;
+    if books.is_empty() { return Err("No Bible books were found in the XML file.".into()); }
+    Ok(books)
 }
 
 fn parse_zefania(doc: &Document<'_>) -> Result<Vec<(i64, BookBuilder)>, String> {
@@ -323,7 +342,7 @@ fn xml_text(node: Node<'_, '_>) -> String {
 }
 
 pub fn parse_lyrics_files(files: &[(String, String)], default_category: &str) -> Result<Vec<ParsedSong>, String> {
-    if files.is_empty() || files.len() > 300 { return Err("Select between 1 and 300 lyrics files.".into()); }
+    if files.is_empty() { return Err("Select at least one lyrics file.".into()); }
     let default_category = match default_category { "hymn" => "hymn", "song" => "song", _ => return Err("Choose Hymn or Song as the default category.".into()) };
     let mut songs = Vec::new();
     for (filename, source) in files {

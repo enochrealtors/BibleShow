@@ -75,8 +75,8 @@ No feature should be marked implemented until it has been tested.
 - [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.
 - [x] Lyrics feed shows song sections alongside the song list.
 - [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into the local library, stages them as presentation slides, and supports muted looping playback in Preview and audience output. Linux playback now uses a token-protected loopback HTTP route with byte-range support to work around WebKitGTK asset URL playback failures; confirm behavior in the desktop app.
-- [~] Import Bible resources in USFM/USX, OSIS and Zefania XML formats; desktop review remains.
-- [~] Import lyrics in OpenLyrics/OpenSong/OpenLP XML, TXT and CSV formats; desktop review remains.
+- [~] Import Bible resources in BibleShow XML, USFM/USX, OSIS and Zefania formats; KJV can be selected by code, and import is available in the Bible feed.
+- [~] Import lyrics in OpenLyrics/OpenSong/OpenLP XML, TXT and CSV formats from the Lyrics feed; files import sequentially with no application-level count or per-file size cap.
 - [~] Presentations feed browses saved local projects and their slides, with controls to Preview, send Live, add one slide, or add the full presentation to the current show.
 - [x] Keyword search results use a dedicated view and clear when a verse is selected.
 - [x] Unsaved project changes prompt to save, discard, or stay before leaving, starting a new show, or opening another project.
@@ -85,7 +85,7 @@ No feature should be marked implemented until it has been tested.
 - [~] Edit show slide titles, subtitles, references/attributions, and Scripture/lyric display text; per-show text overrides are stored separately from imported source content. Desktop review pending.
 - [ ] Slide thumbnails.
 - [~] Preview selection that does not change Live output until explicitly sent.
-- [~] Separate fullscreen Live audience-output window with connected-display selection (desktop verification pending).
+- [~] Separate fullscreen Live audience-output window explicitly targets the selected monitor; external-display runtime verification remains pending.
 - [~] Ubuntu 24.04 x64 trial `.deb` packaging workflow, including GStreamer runtime dependencies; workflow artifact still needs to be built and installed on the user's laptop.
 - [~] Compact "Up Next" preview in the Live monitor for the following service item; Windows desktop layout review pending.
 - [~] Independent Preview and Live previous/next controls for the temporary sequence.

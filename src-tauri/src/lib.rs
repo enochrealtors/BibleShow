@@ -569,23 +569,24 @@ fn search_bible_keyword(app: tauri::AppHandle, translation_id: Option<String>, q
     })).map_err(db_error)?.collect::<Result<Vec<_>, _>>().map_err(db_error)
 }
 
-fn read_resource_request<T: for<'de> Deserialize<'de>>(request: &Request<'_>, label: &str) -> Result<T, String> {
+fn read_resource_request<T: for<'de> Deserialize<'de>>(request: &Request<'_>, label: &str, max_bytes: Option<usize>) -> Result<T, String> {
     let bytes = match request.body() {
         InvokeBody::Raw(bytes) => bytes.as_slice(),
         InvokeBody::Json(_) => return Err(format!("Choose the {label} files again; their contents were not received.")),
     };
-    if bytes.is_empty() || bytes.len() > 64 * 1024 * 1024 { return Err("The selected resources exceed the 64 MB import limit.".into()); }
+    if bytes.is_empty() { return Err(format!("The selected {label} import is empty.")); }
+    if max_bytes.is_some_and(|limit| bytes.len() > limit) { return Err(format!("The selected {label} resources exceed the 64 MB import limit.")); }
     serde_json::from_slice(bytes).map_err(|_| format!("The selected {label} data could not be read."))
 }
 
 #[tauri::command]
 fn import_bible_resources(app: tauri::AppHandle, request: Request<'_>) -> Result<ResourceImportSummary, String> {
-    let request: BibleImportRequest = read_resource_request(&request, "Bible")?;
+    let request: BibleImportRequest = read_resource_request(&request, "Bible", Some(64 * 1024 * 1024))?;
     let id = request.id.trim().to_ascii_uppercase();
     let name = request.name.trim();
     let language = request.language.trim();
-    if id.is_empty() || id.len() > 24 || !id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') || id == "KJV" {
-        return Err("Choose a unique translation code (1–24 letters, numbers, or hyphens); KJV is reserved.".into());
+    if id.is_empty() || id.len() > 24 || !id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-') {
+        return Err("Enter a translation code (1–24 letters, numbers, or hyphens).".into());
     }
     if name.is_empty() || name.chars().count() > 100 || language.is_empty() || language.len() > 16 { return Err("Enter a translation name and language code.".into()); }
     if request.files.len() > 300 || request.files.iter().any(|file| file.content.len() > 8 * 1024 * 1024) { return Err("Choose up to 300 Bible files, each smaller than 8 MB.".into()); }
@@ -616,22 +617,22 @@ fn import_bible_resources(app: tauri::AppHandle, request: Request<'_>) -> Result
 
 #[tauri::command]
 fn import_lyrics_resources(app: tauri::AppHandle, request: Request<'_>) -> Result<ResourceImportSummary, String> {
-    let request: LyricsImportRequest = read_resource_request(&request, "lyrics")?;
-    if request.files.len() > 300 || request.files.iter().any(|file| file.content.len() > 8 * 1024 * 1024) { return Err("Choose up to 300 lyrics files, each smaller than 8 MB.".into()); }
+    let request: LyricsImportRequest = read_resource_request(&request, "lyrics", None)?;
+
     let files: Vec<_> = request.files.into_iter().map(|file| (file.filename, file.content)).collect();
     let songs = resource_import::parse_lyrics_files(&files, &request.category)?;
     let mut db = open_library(&app)?;
     let tx = db.transaction().map_err(db_error)?;
     let mut imported = 0;
     let mut skipped = 0;
-    for (index, song) in songs.iter().enumerate() {
+    for song in &songs {
         if song.sections.is_empty() { skipped += 1; continue; }
         let stable_content = format!("{}\0{}\0{}", song.title, song.authors, song.sections.iter().map(|section| &section.2).cloned().collect::<Vec<_>>().join("\n"));
         let digest = Sha256::digest(stable_content.as_bytes());
         let id = format!("import:{}", digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>());
         let exists: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM songs WHERE id=?1)", [&id], |row| row.get(0)).map_err(db_error)?;
         if exists { skipped += 1; continue; }
-        let source_file = format!("resource-import-{index}");
+        let source_file = format!("resource-import-{}", id.strip_prefix("import:").unwrap_or(&id));
         tx.execute("INSERT INTO songs(id,title,authors,copyright,category,source_file) VALUES (?1,?2,?3,?4,?5,?6)", params![id,song.title,song.authors,song.copyright,song.category,source_file]).map_err(db_error)?;
         for (position, (section_type, label, lyrics)) in song.sections.iter().enumerate() {
             tx.execute("INSERT INTO song_sections(song_id,position,section_type,label,lyrics) VALUES (?1,?2,?3,?4,?5)", params![id,position as i64,section_type,label,lyrics]).map_err(db_error)?;
@@ -760,10 +761,14 @@ fn set_audience_window_visible(app: tauri::AppHandle, visible: bool, display_ind
         let monitors = app.available_monitors().map_err(|error| format!("Could not read connected displays: {error}"))?;
         let index = display_index.unwrap_or(0);
         let monitor = monitors.get(index).ok_or_else(|| "The selected display is no longer available.".to_string())?;
-        window.set_position(*monitor.position()).map_err(|error| format!("Could not position audience output: {error}"))?;
-        window.set_size(*monitor.size()).map_err(|error| format!("Could not size audience output: {error}"))?;
         window.show().map_err(|error| format!("Could not open audience output: {error}"))?;
-        window.set_fullscreen(true).map_err(|error| format!("Could not use fullscreen audience output: {error}"))?;
+        let position = monitor.position();
+        window
+            .set_fullscreen_on_monitor(tauri::PhysicalPosition::new(
+                position.x as f64,
+                position.y as f64,
+            ))
+            .map_err(|error| format!("Could not use fullscreen audience output: {error}"))?;
     } else {
         window.set_fullscreen(false).map_err(|error| format!("Could not exit audience fullscreen: {error}"))?;
         window.hide().map_err(|error| format!("Could not close audience output: {error}"))?;

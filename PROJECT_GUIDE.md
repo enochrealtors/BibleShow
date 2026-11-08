@@ -52,7 +52,7 @@ This workspace is designed for church services, worship sessions, Bible teaching
 
 ### Scripture presentation
 - Select Bible translations.
-- Import additional translations in USFM/USX, OSIS and Zefania formats; KJV remains the default.
+- Import additional translations in BibleShow XML, USFM/USX, OSIS and Zefania formats; KJV remains the default.
 - Search for passages.
 - Display individual verses or complete passages.
 - Display multiple verses across slides.

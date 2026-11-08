@@ -131,6 +131,11 @@ function App() {
     invoke<LibrarySummary>('get_library_summary').then(setLibrary).catch(() => undefined)
   }, [])
 
+  function refreshLibrary() {
+    if (!isTauri()) return
+    invoke<LibrarySummary>('get_library_summary').then(setLibrary).catch(() => undefined)
+  }
+
   async function importLibrary(file?: File) {
     if (!file) return
     if (!file.name.toLowerCase().endsWith('.zip')) {
@@ -188,8 +193,8 @@ function App() {
         </header>}
 
         <div className={`page-content${page === 'presentation' ? ' page-content-presentation' : ''}`}>
-          {page === 'home' && <HomePage onNavigate={setPage} library={library} importState={importState} onImport={importLibrary} onRefreshLibrary={() => invoke<LibrarySummary>('get_library_summary').then(setLibrary)} />}
-          {page === 'presentation' && <PresentationWorkspace onBack={() => setPage('home')} />}
+          {page === 'home' && <HomePage onNavigate={setPage} library={library} importState={importState} onImport={importLibrary} onRefreshLibrary={refreshLibrary} />}
+          {page === 'presentation' && <PresentationWorkspace onBack={() => setPage('home')} onRefreshLibrary={refreshLibrary} />}
           {page !== 'presentation' && <footer className="app-footer"><span>BibleShow</span><span>Built for worship and presentation</span><span className="footer-version">EARLY ACCESS</span></footer>}
         </div>
       </main>
@@ -252,7 +257,7 @@ function HomePage({ onNavigate, library, importState, onImport, onRefreshLibrary
   )
 }
 
-function ResourceImportPanel({ onImported }: { onImported: () => void }) {
+function ResourceImportPanel({ onImported, mode = 'all' }: { onImported: () => void; mode?: 'all' | 'bible' | 'lyrics' }) {
   const [translationId, setTranslationId] = useState('')
   const [translationName, setTranslationName] = useState('')
   const [language, setLanguage] = useState('en')
@@ -263,42 +268,61 @@ function ResourceImportPanel({ onImported }: { onImported: () => void }) {
 
   async function importFiles(kind: 'bible' | 'lyrics', selected: FileList | null) {
     if (!selected?.length) return
+    const selectedFiles = Array.from(selected)
+    let imported = 0
+    let skipped = 0
+    let completed = 0
     setBusy(true); setMessage('Reading selected files…'); setError(false)
     try {
-      const files = await Promise.all(Array.from(selected).map(async (file) => ({ filename: file.name, content: await file.text() })))
-      const payload = kind === 'bible'
-        ? { id: translationId, name: translationName, language, files }
-        : { category, files }
-      const command = kind === 'bible' ? 'import_bible_resources' : 'import_lyrics_resources'
-      const result = await invoke<{ imported: number; skipped: number; detail: string }>(command, new TextEncoder().encode(JSON.stringify(payload)))
-      setMessage(result.detail); onImported()
-    } catch (reason) { setMessage(String(reason)); setError(true) }
-    finally { setBusy(false) }
+      if (kind === 'lyrics') {
+        for (const [index, file] of selectedFiles.entries()) {
+          setMessage('Importing ' + file.name + ' (' + (index + 1) + '/' + selectedFiles.length + ')…')
+          const payload = { category, files: [{ filename: file.name, content: await file.text() }] }
+          const result = await invoke<{ imported: number; skipped: number; detail: string }>('import_lyrics_resources', new TextEncoder().encode(JSON.stringify(payload)))
+          imported += result.imported
+          skipped += result.skipped
+          completed += 1
+        }
+        setMessage('Imported ' + imported + ' lyrics resources; skipped ' + skipped + ' duplicates or empty items.')
+      } else {
+        const files = await Promise.all(selectedFiles.map(async (file) => ({ filename: file.name, content: await file.text() })))
+        const payload = { id: translationId, name: translationName, language, files }
+        const result = await invoke<{ imported: number; skipped: number; detail: string }>('import_bible_resources', new TextEncoder().encode(JSON.stringify(payload)))
+        setMessage(result.detail)
+        completed = selectedFiles.length
+      }
+      onImported()
+    } catch (reason) {
+      if (completed) onImported()
+      setMessage(completed ? 'Stopped after ' + completed + ' files. Added ' + imported + ' lyrics and skipped ' + skipped + '. ' + String(reason) : String(reason))
+      setError(true)
+    } finally { setBusy(false) }
   }
 
-  return <section className="library-panel resource-import-panel" aria-labelledby="resource-import-heading">
+  const heading = mode === 'all' ? 'Add library resources' : mode === 'bible' ? 'Import Bible' : 'Import lyrics'
+  return <section className={'library-panel resource-import-panel' + (mode === 'all' ? '' : ' feed-resource-import')} aria-labelledby="resource-import-heading">
     <div className="library-copy">
-      <div className="section-heading"><div><span className="section-icon"><Icon name="plus" size={17} /></span><h2 id="resource-import-heading">Add library resources</h2></div><span className="muted-label">OFFLINE IMPORT</span></div>
-      <p className="library-status">Add more Bible versions or bring in song libraries. Supports USFM/USX, OSIS and Zefania Bible files; OpenLyrics/OpenSong XML, TXT and CSV lyrics.</p>
-      {message && <p className={`import-message${error ? ' is-error' : ''}`} role="status">{message}</p>}
+      <div className="section-heading"><div><span className="section-icon"><Icon name="plus" size={17} /></span><h2 id="resource-import-heading">{heading}</h2></div>{mode === 'all' && <span className="muted-label">OFFLINE IMPORT</span>}</div>
+      <p className="library-status">{mode === 'bible' ? 'Import USFM, USX, OSIS, Zefania, or BibleShow XML Bible files.' : mode === 'lyrics' ? 'Import OpenLyrics or OpenSong XML, TXT, and CSV songs.' : 'Add Bible versions or song libraries. BibleShow accepts USFM/USX, OSIS, Zefania, BibleShow XML, OpenLyrics/OpenSong XML, TXT, and CSV.'}</p>
+      {message && <p className={'import-message' + (error ? ' is-error' : '')} role="status">{message}</p>}
       <div className="resource-import-fields">
-        <fieldset disabled={busy || !isTauri()}><legend>Bible version</legend>
-          <input aria-label="Translation code" placeholder="Code (for example, ESV)" value={translationId} onChange={(event) => setTranslationId(event.target.value)} />
+        {mode !== 'lyrics' && <fieldset disabled={busy || !isTauri()}><legend>Bible version</legend>
+          <input aria-label="Translation code" placeholder="Code (for example, KJV or ESV)" value={translationId} onChange={(event) => setTranslationId(event.target.value)} />
           <input aria-label="Translation name" placeholder="Version name" value={translationName} onChange={(event) => setTranslationName(event.target.value)} />
           <input aria-label="Language code" placeholder="Language (en)" value={language} onChange={(event) => setLanguage(event.target.value)} />
           <label className="import-button"><span>{busy ? 'Importing…' : 'Choose Bible files'}</span><input type="file" accept=".usfm,.sfm,.usx,.xml,.osis" multiple disabled={busy || !isTauri()} onChange={(event) => { void importFiles('bible', event.currentTarget.files); event.currentTarget.value = '' }} /></label>
-        </fieldset>
-        <fieldset disabled={busy || !isTauri()}><legend>Lyrics</legend>
+        </fieldset>}
+        {mode !== 'bible' && <fieldset disabled={busy || !isTauri()}><legend>Lyrics</legend>
           <select aria-label="Default lyrics category" value={category} onChange={(event) => setCategory(event.target.value as 'hymn' | 'song')}><option value="hymn">Hymns</option><option value="song">Songs</option></select>
           <label className="import-button"><span>{busy ? 'Importing…' : 'Choose lyrics files'}</span><input type="file" accept=".xml,.ost,.txt,.csv" multiple disabled={busy || !isTauri()} onChange={(event) => { void importFiles('lyrics', event.currentTarget.files); event.currentTarget.value = '' }} /></label>
-        </fieldset>
+        </fieldset>}
       </div>
     </div>
   </section>
 }
-
-function PresentationWorkspace({ onBack }: { onBack: () => void }) {
+function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => void; onRefreshLibrary: () => void }) {
   const [activeFeed, setActiveFeed] = useState<PresentationFeed>('bible')
+  const [resourceRevision, setResourceRevision] = useState(0)
   const [liveFeedSlide, setLiveFeedSlide] = useState<PresentationSlide | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [previewSlide, setPreviewSlide] = useState<PresentationSlide | null>(null)
@@ -328,6 +352,11 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
   const [alertMode, setAlertMode] = useState<'static' | 'scrolling'>('static')
   const [activeAlert, setActiveAlert] = useState<{ text: string; mode: 'static' | 'scrolling' } | null>(null)
   const [presentationTheme, setPresentationTheme] = useState<PresentationTheme>(loadPresentationTheme)
+
+  function refreshImportedResources() {
+    setResourceRevision((revision) => revision + 1)
+    onRefreshLibrary()
+  }
   const [overlays, setOverlays] = useState<DisplayOverlay[]>(loadDisplayOverlays)
   const [countdown, setCountdown] = useState<CountdownFunction>({ durationSeconds: 300, remainingSeconds: 300, endsAtMs: null, running: false, visible: false })
   const liveSequenceIndex = livePosition ?? (liveSlide ? sequence.findIndex((item) => item.sourceId === liveSlide.sourceId) : -1)
@@ -867,8 +896,14 @@ function PresentationWorkspace({ onBack }: { onBack: () => void }) {
               ['bible', 'Bible'], ['lyrics', 'Lyrics'], ['media', 'Videos / Images'], ['presentations', 'Presentations'], ['live', 'Live Feed'], ['themes', 'Themes'], ['functions', 'Functions'], ['overlays', 'Overlays'], ['url', 'URL Media'],
             ] as const).map(([key, label]) => <button key={key} className={activeFeed === key ? 'selected' : ''} onClick={() => setActiveFeed(key)}>{label}</button>)}</nav>
             <div className="feed-content">
-              {activeFeed === 'bible' && <BibleSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} previewSourceId={previewSlide?.sourceId ?? null} searchRequest={bibleSearchRequest} />}
-              {activeFeed === 'lyrics' && <SongSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
+              {activeFeed === 'bible' && <>
+                <ResourceImportPanel mode="bible" onImported={refreshImportedResources} />
+                <BibleSourcePicker key={resourceRevision} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} previewSourceId={previewSlide?.sourceId ?? null} searchRequest={bibleSearchRequest} />
+              </>}
+              {activeFeed === 'lyrics' && <>
+                <ResourceImportPanel mode="lyrics" onImported={refreshImportedResources} />
+                <SongSourcePicker key={resourceRevision} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />
+              </>}
               {activeFeed === 'media' && <MediaSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
               {activeFeed === 'presentations' && <SavedPresentationsFeed presentations={presentations} onRefresh={refreshPresentations} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} />}
               {activeFeed === 'live' && <NetworkLiveFeed onConnect={connectNetworkFeed} onConnectCamera={connectCamera} onConnectUrl={connectStreamUrl} onStop={stopNetworkFeed} slide={liveFeedSlide} cameraStream={cameraStream} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} />}
@@ -1141,7 +1176,7 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
   useEffect(() => {
     if (!isTauri()) return
     let active = true
-    invoke<TranslationSummary[]>('get_bible_translations').then((items) => { if (active) { setTranslations(items); const selected = items.find((item) => item.id === translationId)?.id ?? items[0]?.id ?? 'KJV'; setTranslationId(selected); return invoke<BookSummary[]>('get_bible_books', { translationId: selected }) } }).then((items) => { if (active && items) { setBooks(items); if (!items.length) setError('Import a Bible version from Home first.') } }).catch((reason) => { if (active) setError(String(reason)) })
+    invoke<TranslationSummary[]>('get_bible_translations').then((items) => { if (active) { setTranslations(items); const selected = items.find((item) => item.id === translationId)?.id ?? items[0]?.id ?? 'KJV'; setTranslationId(selected); return invoke<BookSummary[]>('get_bible_books', { translationId: selected }) } }).then((items) => { if (active && items) { setBooks(items); if (!items.length) setError('Use the Bible import controls above to add a version.') } }).catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
   }, [translationId])
 
@@ -1256,7 +1291,7 @@ function SongSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { o
       if (!active) return
       setSongs(items)
       setSelectedSongId((current) => items.some((song) => song.id === current) ? current : items[0]?.id ?? '')
-      setError(items.length ? '' : 'No matching lyrics. Import the cleaned content ZIP from Home if the library is empty.')
+      setError(items.length ? '' : 'No matching lyrics. Use the Lyrics import controls above to add songs or hymns.')
     }).catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
   }, [category, search])
