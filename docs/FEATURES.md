@@ -1,7 +1,7 @@
 # BIBLESHOW — MASTER FEATURE REGISTER
 
 **Document version:** 1.0
-**Last updated:** 3 November 2026
+**Last updated:** 8 November 2026
 
 New product suggestions and feedback must be appended to [`docs/PROJECT_SUGGESTIONS.md`](PROJECT_SUGGESTIONS.md). When a suggestion is agreed and enters the roadmap, update the relevant feature here and the project guide/status as needed; keep the suggestion entry and its disposition for traceability.
 
@@ -69,7 +69,7 @@ No feature should be marked implemented until it has been tested.
 - [~] Capture a connected camera/webcam in the operator window and relay the same feed to the audience window over WebRTC; desktop permission and runtime verification remain.
 - [~] Play direct HTTP(S) video/HLS and MJPEG endpoints when supported by the target WebView; Windows WebView2 and Ubuntu WebKitGTK compatibility remain to be verified.
 - [~] Detect common YouTube watch/live links and display them in YouTube's embedded player; owner embed restrictions and user gesture/autoplay behavior need desktop verification.
-- [!] RTSP/RTSPS uses an experimental GStreamer backend; Windows runtime packaging and real-source playback remain unverified. NDI is not implemented.
+- [!] RTSP/RTSPS uses a GStreamer backend; Windows compile validation passed against an installed GStreamer 1.28.8.1 runtime, but portable runtime packaging and real-source playback remain unverified. NDI is not implemented.
 - [x] KJV reference/range and keyword search in the presentation workspace.
 - [x] Multi-verse passages are staged as one readable verse per slide.
 - [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.

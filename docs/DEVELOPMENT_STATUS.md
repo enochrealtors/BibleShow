@@ -1,7 +1,7 @@
 # BIBLESHOW — DEVELOPMENT STATUS
 
 **Document version:** 1.0
-**Last updated:** 3 November 2026
+**Last updated:** 8 November 2026
 **Project status:** GitHub baseline established; initial shell and local KJV/lyrics importer implemented; starter content package prepared.
 
 ## 1. Current Development Environment
@@ -297,3 +297,12 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - Updated the feature register and database design document. Files changed: `src/App.tsx`, `src/App.css`, `src-tauri/src/lib.rs`, `docs/FEATURES.md`, `docs/DATABASE_DESIGN.md`, and this document.
 - Validation: `npm run lint`, `npm run build`, `cargo check --manifest-path src-tauri/Cargo.toml`, and `git diff --check` passed. Verify editing, reset, save/reopen and JSON round-trip in the Windows desktop app.
 - Exact next task: review this editor on Windows, then continue with Scripture and lyric slide formatting from the presentation design roadmap.
+
+### 17. Current session - Windows RTSP receiver cleanup
+
+- Updated the native GStreamer bus handler so both pipeline errors and end-of-stream stop the tokenized loopback MJPEG bridge. This prevents Preview and audience clients from continuing to receive a stale last frame after the source ends.
+- Verified the existing checkout is clean on main and matches the current GitHub main commit 3937249 before editing.
+- This Windows environment has GStreamer 1.28.8.1 and the RTSP, JPEG decoder/encoder, appsink, video conversion and playbin plugins. The Windows Rust cargo check passed against those installed libraries.
+- Validation passed: npm run lint, TypeScript checks for app and node configs, Vite production build to a scratch directory, Windows cargo check, and git diff --check. No test suites were run.
+- No real RTSP source was available. Actual stream playback, Preview/audience runtime behavior, and portable Windows GStreamer packaging remain unverified.
+- Exact next task: smoke-check RTSP/RTSPS connection, disconnect and source-loss recovery in the desktop app with a real source; then document the Windows runtime packaging requirements. NDI remains a separate follow-on after SDK distribution review.

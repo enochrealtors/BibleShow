@@ -1,7 +1,7 @@
 # Live Feed Design
 
-**Status:** Direct camera/webcam capture, HTTP(S) MJPEG/video endpoints, and YouTube links through the official embedded player are implemented in the Live Feed feed. Camera output uses an operator-to-audience WebRTC relay. Runtime compatibility and actual device playback still need desktop verification. RTSP/GStreamer remains an optional experimental path.
-**Last updated:** 3 November 2026
+**Status:** Direct camera/webcam capture, HTTP(S) MJPEG/video endpoints, and YouTube links through the official embedded player are implemented in the Live Feed feed. Camera output uses an operator-to-audience WebRTC relay. Runtime compatibility and actual device playback still need desktop verification. RTSP/GStreamer receiving is implemented and under cross-platform verification; the Windows build has been checked against GStreamer 1.28.8.1, but real-source playback and portable runtime packaging remain unverified.
+**Last updated:** 8 November 2026
 
 ## Goal
 
@@ -32,10 +32,10 @@ Keep source credentials out of project exports and visible labels. Define a secu
 - Use the same operator-to-audience WebRTC relay for the decoded URL stream where both windows must show one synchronized source.
 - Recognize common YouTube watch, short, and live links and convert only the validated 11-character video ID to YouTube's documented `/embed/VIDEO_ID` player URL. Do not pass a watch page to `<video>`; keep YouTube iframe playback distinct from direct stream formats. A stream can still refuse embed playback or require a user gesture for audio/autoplay.
 
-### 3. RTSP/RTSPS and NDI — optional native adapters
+### 3. RTSP/RTSPS native receiver — implemented; runtime verification pending
 
-- The current branch contains a GStreamer RTSP receiver with a loopback MJPEG bridge, TCP transport and a tokenized local endpoint. It compiles on this Ubuntu VM but has not been verified against a real camera. It requires GStreamer and is not part of the no-GStreamer camera/URL path.
-- Keep or remove this adapter after direct camera and browser-playable URL feeds work. Do not promise arbitrary RTSP URLs as browser-playable.
+- The GStreamer RTSP/RTSPS receiver uses TCP transport and a tokenized loopback MJPEG bridge shared by operator Preview and audience output. It compiles on the Ubuntu VM and on Windows with GStreamer 1.28.8.1 installed, but playback against a real source is unverified. It requires the GStreamer runtime and plugins.
+- Keep this native adapter as the first network-stream receiver while preserving camera and browser-playable HTTP(S) as no-GStreamer paths. Do not promise arbitrary RTSP URLs as browser-playable.
 - NDI® discovery and receive would require its SDK as a separate adapter; review current distribution requirements before implementation.
 
 ### 4. NDI® discovery and receive
@@ -49,7 +49,7 @@ Keep source credentials out of project exports and visible labels. Define a secu
 - `navigator.mediaDevices.getUserMedia()` requires a secure context and explicit permission; verify device selection and OS-level access in both Tauri target platforms.
 - RTSP is not a native browser video transport. A direct camera and supported HTTP(S) stream can avoid GStreamer, but that does not make RTSP/NDI endpoints work without a native adapter or a conversion service.
 - A single camera source feeds Preview and audience output through a local WebRTC peer connection. Verify codec support, startup, stop, audience-window reopening, and reconnect behavior on Windows WebView2 and Ubuntu WebKitGTK.
-- GStreamer 1.28 development libraries and plugins remain installed on this Ubuntu VM from the experimental RTSP stage. The last compile passed; playback against a real source remains unverified.
+- GStreamer 1.28 development libraries and plugins remain installed on the Ubuntu VM. The Windows development environment also has GStreamer 1.28.8.1 and the required plugins; a Windows Rust compile passed. Neither compile verifies real-source playback, and portable Windows runtime packaging remains unresolved.
 
 ## Reference documentation
 

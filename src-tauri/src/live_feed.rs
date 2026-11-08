@@ -152,7 +152,11 @@ pub fn connect(
         };
         while !stop_for_bus.load(Ordering::Relaxed) {
             if let Some(message) = bus.timed_pop(gst::ClockTime::from_mseconds(500)) {
-                if let gst::MessageView::Error(_) = message.view() {
+                if matches!(
+                    message.view(),
+                    gst::MessageView::Error(_) | gst::MessageView::Eos(_)
+                ) {
+                    stop_for_bus.store(true, Ordering::Relaxed);
                     let _ = pipeline_for_bus.set_state(gst::State::Null);
                     let _ = app_handle.emit(
                         "bibleshow-live-feed-error",
