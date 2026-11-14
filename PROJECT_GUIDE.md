@@ -109,7 +109,7 @@ This workspace is designed for church services, worship sessions, Bible teaching
 
 The presentation workspace is planned as a resizable four-area operator layout, beneath a top toolbar:
 
-1. **Left panel — projects and service order:** Show created or imported presentation projects and the items arranged for the current show. Operators should be able to add items to the show, including by drag and drop where appropriate. Before a temporary show is discarded on close, offer to save it as a reusable project, following the familiar project workflow of EasyWorship.
+1. **Left panel — current show:** Use the full panel for the current show's slide items. Operators can drag content from feeds into the show, drag show items to reorder them, and use direct controls for preview, editing and removal. Put project creation, open/save, name, import and export controls in the File menu. Before a temporary show is discarded on close, offer to save it as a reusable project.
 2. **Centre upper panel — Preview and Live:** Keep Preview and Live visible together. Preview shows the selected or staged item; Live shows what the audience currently sees. Selecting or browsing Bible and lyric content must populate Preview without changing Live. Sending the selection to Live must require an explicit action. Include other operator information here when it helps prepare the next item.
 3. **Centre lower panel — content feed:** Provide browsable feeds for the types of content that can be added to a show: Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Video/Images, Themes, Functions, Overlays, and further categories as the product grows. Selecting a feed should expose the appropriate items and selection controls for that content type.
 4. **Right panel — display controls:** Provide display/output controls, including clearing individual displayed items, closing an output, and managing message alerts. Alerts should support both scrolling and static presentation.
@@ -133,6 +133,27 @@ This layout is the current working direction, not a frozen specification. Record
 - Support a separate resizable Live output window before physical projector and multiple-monitor support is available.
 - Present Bible verses and individual song sections as slide-sized pages, preserving source ordering and readable text layout.
 - Make content selection visible and actionable: choosing a Bible verse or lyric section must populate the selected/staged Preview item and make it available to add to the current show; the operator then explicitly sends it Live.
+
+### Shared feed search and resource imports
+
+- Keep one search bar for the selected content feed. In Bible, it offers Reference and Keyword modes; in Lyrics, it searches titles, authors and lyric text; in Videos / Images and Presentations, it searches the visible library items. Other feeds apply the same query to their available items.
+- Submitting a Bible reference loads and highlights the selected passage in the Bible feed, creates one readable slide per verse, adds the slides to the current show, and stages the first verse in Preview and Live. The verse selector and From/To range controls remain available.
+- Clicking a Bible verse or lyric section stages that item in Preview. Double-clicking or pressing Enter on an item sends it Live. Submitting a lyric search presents all sections of the selected song as ordered slides.
+- Split formatted lyric headings such as Verse, Chorus, Bridge and numbered stanzas into separately selectable slides, including for songs already stored as one section. A single unheaded section may use blank-line stanza breaks.
+- Keep Bible and lyrics import as compact import-icon buttons in their feeds. Open version/category and file-selection details in a dialog so the search, verse selector and content remain visible.
+- Import lyric collections in bounded batches and database transactions so libraries of 5,000 or more files do not incur one desktop request and transaction per file.
+- Keep the Preview/Live region compact enough that every content tab receives a useful share of the operator window; retain the adjustable divider.
+- In Bible Reference mode, suggest matching book names while typing. In Keyword mode, begin passage suggestions after four words and narrow the list as the query becomes more specific.
+
+### Themes and message alerts
+
+- Provide solid-color built-in themes, user-designed themes, imported image/video backgrounds, and live camera/video backgrounds.
+- Place message alerts at the bottom by default. Let operators set position, size, color, scrolling repeat count or until-removed behavior, and static display duration. Save alerts by title and content and make saved alerts searchable.
+
+### PowerPoint and current-show workflow
+
+- After a PowerPoint deck is prepared, list all slides in the Presentation feed with Preview, Send Live, Add page to show, and Add all pages to show actions.
+- Put project creation, open/save, import and export in the File tab. Use the left workspace panel for draggable and reorderable current-show items.
 
 This operator workflow is informed by the official [FreeShow output workflow](https://freeshow.app/docs/output) and [ProPresenter interface guide](https://support.renewedvision.com/hc/en-us/articles/360041345954-Understanding-The-ProPresenter-User-Interface). These are product references for preview, live output and operator control.
 
@@ -223,6 +244,13 @@ Potential technologies include:
 The detection engine must be modular so that speech recognition and semantic search providers can be replaced without rebuilding the entire application.
 
 Online AI services must remain optional. Do not assume they will be permanently free.
+
+### Approved operating controls
+
+- Let the operator choose a microphone, local or optional online processing, assisted review or automatic Live behavior, and separate percentage thresholds for direct references and paraphrases.
+- A recognized direct reference may go Live immediately only when that option is enabled. Paraphrase matches must meet the operator's configured threshold; lower-scoring candidates stay in the review list.
+- Prefer free or free-tier services, but disclose that pricing and free tiers can change. Optional online paraphrase matching sends transcript text only. Any service that sends microphone audio must be a separate, clearly disclosed, off-by-default choice. Keep provider credentials in memory unless the user separately approves secure persistence.
+- Keep a one-action stop/disable control and an immediate operator override visible while detection is active.
 
 ---
 
@@ -499,7 +527,7 @@ The project will be developed in eight major phases.
 - Add backgrounds.
 - Add media organisation.
 - Add supported document imports.
-- Add presentation themes and transitions.
+- Add built-in color themes and imported image/video background themes, then add transitions.
 
 ## Phase 5 — Intelligent Scripture Detection
 
@@ -563,6 +591,7 @@ These rules are mandatory throughout the project.
 ## 11.2 Development discipline
 
 - Work incrementally.
+- Prefer the smallest focused code change that solves the request; avoid large rewrites when a few clear lines are enough. Keep implementation and progress updates concise to conserve limited free tokens without sacrificing correctness or maintainability.
 - Explain significant architectural decisions.
 - Test changes before declaring them complete.
 - Preserve existing working functionality.

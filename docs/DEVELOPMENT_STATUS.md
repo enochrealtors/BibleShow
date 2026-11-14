@@ -1,7 +1,7 @@
 # BIBLESHOW — DEVELOPMENT STATUS
 
 **Document version:** 1.0
-**Last updated:** 8 November 2026
+**Last updated:** 10 November 2026
 **Project status:** GitHub baseline established; initial shell and local KJV/lyrics importer implemented; starter content package prepared.
 
 ## 1. Current Development Environment
@@ -315,3 +315,101 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - Added Bible and Lyrics import controls to their respective Presentation feeds and refreshes the source lists after import.
 - Validation passed: lint, TypeScript, frontend build, Rust compile, and diff checks. `rustfmt --check` flags broad formatting differences across both existing Rust files; no whole-file reformat was applied. No test suites were run.
 - Runtime review is still needed for external-screen placement and representative Bible/lyrics XML files.
+
+### 19. Current session — Bible and lyrics workflow corrections
+
+- Inspected the clean local checkout on `main`, two commits ahead of `origin/main`, and read the project guide, continuation notes, feature register, import/media/database designs, rights notes, suggestions, and remaining project documentation before editing.
+- Identified the regressions in commit `c24384a`: the expanded import panels were inserted above the Bible and Lyrics pickers, and lyrics were changed to one serial Tauri request and database transaction per file. The prior implementation submitted the selected lyric files together.
+- Moved feed imports behind compact icon-triggered dialogs. Restored feed browsing space and made the shared search bar follow the active feed; Bible retains Reference/Keyword modes, while lyrics search titles, authors and lyric text.
+- Preserved the Bible version/book/chapter and verse-range selectors. Reference submission now loads and highlights the selected range, creates one slide per verse, adds the pages to the current show, and sends the first page to Preview and Live. Verse and lyric section selection continue to stage Preview, with double-click/Enter sending the selected item Live. Lyric sections display their full text; submitting a lyric search presents its ordered sections.
+- Changed lyric ingestion to bounded batches of at most 128 files or about 6 MB of source text, with oversized serialized batches split and prior completed batches retained. SQLite inserts reuse prepared statements and use `INSERT OR IGNORE` for duplicate fingerprints.
+- Added and passed a focused Rust profile test for parsing and persisting 5,000 synthetic OpenLyrics files: parsing took 324 ms and SQLite insertion took 217 ms in the in-memory test.
+- Validation passed: `npm run lint`, TypeScript checks for the app and node configurations, Vite production build, the focused Windows Rust test build/run, and `git diff --check`. The first Rust compile caught a digest-formatting error, which was fixed before the passing run. `cargo fmt --check` still reports broad formatting differences already present across the Rust files; no whole-file reformat was applied.
+- The reviewed change set is applied to the original checkout. Desktop review with the user’s real Bible and lyrics library remains necessary to confirm search, Preview/Live behavior, and end-to-end import time. Exact next task: smoke-check those workflows in the desktop app. Do not commit or push without explicit authorization.
+
+### 20. Current session — split formatted lyrics into display slides
+
+- The user reported that a song stored as one database section was being sent to Preview/Live as one long slide.
+- The Lyrics feed now splits stored sections at formatted Verse/Chorus/Refrain/Bridge/Pre-Chorus/Intro/Outro headings, short section codes such as V1 and C1, and numbered stanza headings. If a song contains one unheaded Verse/Section, blank-line-separated stanzas become individual verse slides.
+- The normalized sections are used both in the Lyrics browser and when submitting a song, so each part can be selected for Preview/Live and the sequence starts with the first part.
+- Validation passed: ESLint, TypeScript checks and Vite production build. `git diff --check` passed. Desktop interaction with the user's actual lyrics remains unverified.
+
+### 21. Current session — PowerPoint capture and media output fixes
+
+- Reconstructed the interrupted task from this Codex thread, its earlier completed turns, the cached referenced ChatGPT conversation, and the repository handoff documents. The separately referenced ChatGPT conversation is not readable through the available history connector. The recorded sequence is: implement and verify four PowerPoint/media fixes, then begin automatic Bible reference/paraphrase detection. The previous run stopped at the usage limit after the four fixes were coded and before detection began.
+- Added Windows PowerPoint integration: attach to an existing Office instance when possible, launch a windowed slideshow, capture its window for BibleShow Preview/Live, and let BibleShow navigate the slides. A static slide image is used for selection Preview; the captured stream is used for output.
+- Changed local video end handling to seek to the beginning, resume playback, and clear stale buffering state. Hid image/video source names in Preview and Live. Added Clear Media to remove image/video entries from the current show while keeping imported library files.
+- Automated verification passed: `npm run lint`, `npm run build`, `git diff --check`, and isolated Rust library tests (8 passed, 0 failed, 1 ignored). The ignored PowerPoint test requires an interactive Windows logon and installed PowerPoint. An earlier COM smoke test failed because the background process had no usable Windows logon session; an isolated Tauri launch also could not create a WebView because Windows reported that the resource was in use. Therefore none of the four fixes has received a desktop runtime review yet.
+- S-005 is implemented but awaits desktop review. Do not begin S-006 speech detection until PowerPoint capture/navigation, video loop-at-end, hidden media names, and queue-only Clear Media are verified in the Windows app. Detection controls already approved by the user: selectable microphone; local/optional online processing; assisted review and configurable auto-Live; separate direct-reference and paraphrase toggles/thresholds; optional online paraphrase matching sends transcript text only; any audio upload requires a separate, clearly disclosed opt-in.
+- Current Git state: `main`, two commits ahead of `origin/main`, with the existing two local commits preserved. The current implementation and documentation edits remain uncommitted; no commit or push was made. Keep all existing work intact.
+- Exact next task: run the Windows desktop app in the user's interactive session and verify all four S-005 behaviors with a sample PowerPoint and representative video/image slides. If verified, mark S-005 verified and start S-006; otherwise fix only the observed issue. Do not commit or push until the user confirms the app works.
+
+### 22. Current session — Live loop buffering and PowerPoint launch control
+
+- The user reports Preview video now repeats with only occasional short buffering, while Live can wait up to a minute at each loop. Live output and its operator monitor now use the WebView's native loop; audience drift correction only seeks when the gap exceeds 1.5 seconds and no more than once every two seconds. Preview retains its explicit restart behavior. This targets repeated synchronization seeks near the Live loop boundary; verify against the user's actual video before marking it fixed.
+- The selected PowerPoint file now has a visible `Start in BibleShow` button in the file header, next to Delete. It changes to `Stop PowerPoint` after connection. Preview text points to this control; the lower duplicate launch button was removed.
+- Added the user's coding preference to this guide: keep changes focused and concise, choosing a few clear lines over broad rewrites when they solve the task safely.
+- Validation passed: ESLint, separate TypeScript checks for the app and Vite config using temporary cache files, Vite production build to a temporary output folder, and `git diff --check`. The standard `npm run build` could not write TypeScript/Vite temporary cache files under `node_modules` (`EPERM`); the same type and bundling checks passed with those caches/output redirected to Temp. The user reports BibleShow is open, but desktop window discovery timed out again, so no visual or playback behavior has been confirmed in this session.
+- Exact next task: run lint and production build, then inspect the Presentation feed and test the PowerPoint button, Live video loop behavior, Preview loop, hidden media names, and Clear Media in the interactive desktop app. Keep S-005 at implemented/review-needed until these pass. Do not begin S-006 or commit/push yet.
+
+### 23. Current session — PowerPoint responsiveness and live presentation output
+
+- The previous PowerPoint start path synchronously ran PowerShell/COM work in Tauri commands. If the capture thread produced no frame, startup timed out after eight seconds and then joined that thread; a stalled window capture could make the join wait forever. Start, preview export, navigation and stop now run in Tauri's blocking-task pool with bounded PowerShell waits. Failed startup detaches the capture worker instead of waiting indefinitely.
+- Starting a selected PowerPoint now stages slide 1 into Preview. Preview uses its exported still image when available and the captured stream as a fallback; Take Live switches the projector output to the stream. The MJPEG response no longer sends `Connection: close`, which conflicts with a continuous multipart frame response.
+- Live and audience videos now use native looping. Audience output follows explicit operator play, pause and seek commands without repeated periodic time-correction seeks. This targets the remaining buffering at Live loop boundaries; actual playback still needs review with the user's media.
+- Validation: app TypeScript check and Vite production build passed with temporary cache/output paths; all Rust library tests passed (9 passed, 0 failed, 1 ignored); `git diff --check` passed. The ignored PowerPoint capture test requires an interactive Windows logon and installed PowerPoint. The MJPEG header regression is covered by a deterministic unit test; its earlier loopback-socket test was aborted by Windows. ESLint was stopped after unusually slow progress. Desktop inventory timed out twice, so PowerPoint capture/navigation and video looping have not been exercised interactively.
+- Exact next task: verify the PowerPoint and media behavior in the desktop app when window access is available. Keep S-005 as implemented/review-needed; do not start S-006 or commit/push until S-005 is verified.
+
+### 24. Current session — In-app PowerPoint slide browser
+
+- The user asked to remove the long Start instruction, keep a compact Start button, and show every PowerPoint slide in a scrollable in-app list for selection. The original file remains available through a separate Open in PowerPoint action. Video buffering is explicitly deferred.
+- Reviewed Microsoft's [PowerPoint Slide.Export](https://learn.microsoft.com/en-au/office/vba/api/powerpoint.slide.export), [windowed slideshow](https://learn.microsoft.com/en-us/office/vba/api/powerpoint.slideshowsettings.showtype), [SetParent](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setparent), and [Windows Graphics Capture](https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture) documentation. The capture/reparent paths do not supply the slide browser and bring capture-picker or cross-process/DPI concerns. EasyWorship's [official PowerPoint-to-presentation guide](https://support.easyworship.com/support/solutions/articles/24000020419-create-easyworship-presentation-from-powerpoint-) also documents exporting all slides to PNG for use as an in-app presentation. BibleShow now uses exported slide images for Preview/Live and keeps PowerPoint available for navigation. Microsoft cautions that unattended Office automation can hang; the COM integration needs verification in the logged-in desktop session ([guidance](https://learn.microsoft.com/en-us/office/client-developer/integration/considerations-unattended-automation-office-microsoft-365-for-unattended-rpa)).
+- Added slide thumbnails to the Start result and replaced the one-slide page selector with a vertically scrollable slide list. Clicking a slide stages it in Preview; double-click or its Live button sends it Live. The compact Start and separate Open in PowerPoint controls replace the long instruction. Removed the PowerPoint capture worker and its unused dependency.
+- Validation: app and node TypeScript checks passed; the Vite production build passed; Rust library tests passed (9 passed, 0 failed, 1 ignored); `git diff --check` passed. I attempted the ignored PowerPoint smoke test, but the background agent session could not create the Office COM object (`0x80070520`: specified logon session does not exist); it failed before creating a test deck. The desktop app is closed, so visual and runtime checks remain pending. Do not claim slide browsing is fully verified until tested in the app.
+- Next: verify Start, the scrollable slide list, Preview/Live images and PowerPoint navigation in BibleShow. Then work on S-007 Themes: built-in background/text color themes and imported image/video themes. S-006 Bible speech detection is later in the sequence. Do not commit or push before the user reviews the app.
+
+### 25. Current session — Ordered workspace and content improvements
+
+- Read the project guide, continuation handoff, feature register, suggestions, technical decisions, database design, resource/media/live-feed notes, rights/import review, and development status before editing. The attached FreeShow screenshot is treated as a visual reference only.
+- Batch 1: reduced the default Preview/Live height from 390 px to 320 px, capped its share at 46% of the center workspace, and reserved at least 220 px for the shared lower feed. The divider remains adjustable, so all feed tabs benefit.
+- Verification: `npm run build` and `git diff --check` passed. Full-project lint was stopped after producing no output for over two minutes. Windows UI automation timed out during app selection, so visual runtime review remains pending.
+- Next batches, in order: Bible autocomplete; themes; message-alert timing/library; PowerPoint slide actions; move project management into File and dedicate the left panel to show items. Do not begin later batches until the current one is implemented and checked. No commit or push.
+
+### 26. Current session — Bible search autocomplete
+
+- Reference mode now suggests book names from the selected translation as the operator types, including prefix collisions. Keyboard arrows and Enter select a suggestion without removing the existing reference search.
+- Keyword mode starts after four words and uses a 300 ms debounce to query up to ten matching verses from the installed local Bible. A suggested verse stages Preview; double-click or Enter sends it Live. Manual keyword search still returns up to 100 results.
+- The Rust search command now accepts a clamped result limit (1–100), shared by suggestion and full-search calls.
+- Verification: final `npm run build`, `cargo check --manifest-path src-tauri/Cargo.toml --lib` (passed after a 5m27s build), and `git diff --check` passed. ESLint produced no output for over 30 seconds and was stopped; desktop interaction review remains pending because UI automation timed out during app selection.
+- Next in the user's queue: S-007 Themes, expanded to include custom themes and live camera/video backgrounds. Then S-010 message alerts, S-011 PowerPoint actions, and S-012 File/show-panel relocation. No commit or push.
+
+### 27. Current session — Themes
+
+- Added six solid built-in themes and a small editor that saves custom background/text colors locally.
+- Reused the existing media library import and storage path for image/video backgrounds. Selected themes render behind Scripture and lyric text in Preview, Live and audience output.
+- Added the currently connected camera or video stream as an optional theme. Live source details stay in memory for the session and are cleared when that source disconnects.
+- Verification: `npm run build` and `git diff --check` passed. Desktop interaction review remains pending because the Windows UI bridge timed out earlier in this session; ESLint has been unreliable and is not claimed as passed.
+- Next in the user's queue: S-010 message-alert timing, styling, saving and search. No commit or push.
+
+### 28. Current session — Timed and reusable message alerts
+
+- Alerts default to the bottom of the output, with top/middle placement, text sizing, text color and background color controls.
+- Static alerts clear after the selected number of seconds. Scrolling alerts repeat a selected number of 18-second passes or continue until manually cleared. Preview and audience output use the same position and colors.
+- Added a local saved-message library with title/content, search across both fields, load-to-editor and delete actions.
+- Verification: `npm run build` and `git diff --check` passed. Desktop interaction/timer review remains pending because the Windows UI bridge timed out earlier in this session.
+- Next in the user's queue: S-011 PowerPoint slide Preview/Live/Add/Add all actions. No commit or push.
+
+### 29. Current session — PowerPoint slide actions
+
+- Kept the existing scrollable PowerPoint slide browser and added explicit per-slide Preview, Send Live, and Add actions, plus Add all pages to show.
+- Bulk addition respects the existing 500-slide saved-show limit and reports how many more pages fit in the current show.
+- Verification: `npm run build` and `git diff --check` passed. PowerPoint desktop interaction remains pending because the Windows UI bridge timed out earlier in this session.
+- Next in the user's queue: S-012 move project management into File and dedicate the left panel to current-show items. No commit or push.
+
+### 30. Current session — File menu and current-show workspace
+
+- Moved New, show name, open/save/delete project, JSON import/export and the current-show item count into the File menu, keeping the existing lyrics-library actions there.
+- Removed project controls from the left panel and dedicated its full height to current-show items. Bible, lyrics, image/video, PDF and PowerPoint pages can be dragged into the show; show rows can be dragged to reorder, with arrow controls retained.
+- Enforced the existing 500-slide show limit when adding one or multiple items so a show cannot become unsavable through these actions.
+- Verification: final `npm run build` and `git diff --check` passed. Desktop interaction review remains pending because the Windows UI bridge timed out earlier in this session.
+- All six requested batches now have implementation and production-build checks. No commit or push.

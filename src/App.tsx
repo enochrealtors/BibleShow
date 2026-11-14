@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { emit, listen } from '@tauri-apps/api/event'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import './App.css'
 
+let pdfJsModule: Promise<typeof import('pdfjs-dist')> | null = null
+
+function loadPdfJs() {
+  pdfJsModule ??= import('pdfjs-dist').then((pdfjs) => {
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+    return pdfjs
+  })
+  return pdfJsModule
+}
+
 type Page = 'home' | 'presentation'
-type IconName = 'home' | 'book' | 'screen' | 'search' | 'sun' | 'moon' | 'arrow' | 'plus' | 'spark' | 'clock' | 'settings'
+type IconName = 'home' | 'book' | 'screen' | 'search' | 'sun' | 'moon' | 'arrow' | 'plus' | 'import' | 'spark' | 'clock' | 'settings'
 
 function currentTimeMs() { return Date.now() }
 
@@ -33,17 +45,33 @@ type ChapterData = { book_number: number; name: string; chapter_number: number; 
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
-type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; bodyOverride?: string | null; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; translationId?: string; songId?: string; sectionIndex?: number; mediaId?: string; mediaPath?: string; mediaUrl?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
+type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; bodyOverride?: string | null; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'pdf' | 'powerpoint' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; translationId?: string; songId?: string; sectionIndex?: number; mediaId?: string; presentationFileId?: string; documentPage?: number; pageCount?: number; mediaPath?: string; mediaUrl?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
 type QueuedSlide = PresentationSlide & { queueId: string }
 type MediaFile = { id: string; filename: string; mediaType: 'image' | 'video'; mimeType: string; localPath: string; fileSize: number; playbackUrl?: string | null }
 type VideoPlayback = { sourceId: string; isPlaying: boolean; loop: boolean; currentTime: number; duration: number; startAtMs: number; updatedAtMs: number; commandId: number }
-type PresentationTheme = 'classic' | 'warm' | 'midnight'
+type SolidTheme = { kind: 'solid'; id: string; name: string; backgroundColor: string; textColor: string }
+type MediaTheme = { kind: 'media'; id: string; name: string; mediaId: string; mediaType: 'image' | 'video'; mediaPath: string; playbackUrl?: string | null; textColor: string }
+type LiveTheme = { kind: 'live'; id: string; name: string; sourceId: string; liveStreamKind: 'camera' | 'video' | 'mjpeg' | 'youtube'; liveStreamUrl?: string; youtubeVideoId?: string; textColor: string }
+type PresentationTheme = SolidTheme | MediaTheme | LiveTheme
+type MessageAlert = { id: string; text: string; mode: 'static' | 'scrolling'; position: 'top' | 'middle' | 'bottom'; fontSize: number; textColor: string; backgroundColor: string; staticDurationSeconds: number; repeatCount: number | null }
+type SavedMessageAlert = { id: string; title: string; content: string }
+const builtInThemes: SolidTheme[] = [
+  { kind: 'solid', id: 'classic', name: 'BibleShow Classic', backgroundColor: '#263a2e', textColor: '#fffef7' },
+  { kind: 'solid', id: 'warm', name: 'Warm Parchment', backgroundColor: '#5b3f27', textColor: '#fff4dc' },
+  { kind: 'solid', id: 'midnight', name: 'Midnight Blue', backgroundColor: '#14233d', textColor: '#f2f5ff' },
+  { kind: 'solid', id: 'black', name: 'Black', backgroundColor: '#080808', textColor: '#ffffff' },
+  { kind: 'solid', id: 'royal', name: 'Royal Purple', backgroundColor: '#39244f', textColor: '#fff8e9' },
+  { kind: 'solid', id: 'ocean', name: 'Ocean', backgroundColor: '#064553', textColor: '#effbff' },
+]
+const defaultTheme = builtInThemes[0]
 type DisplayOverlay = { id: string; title: string; text: string; mode: 'static' | 'scrolling'; visible: boolean; locked: boolean }
 type CountdownFunction = { durationSeconds: number; remainingSeconds: number; endsAtMs: number | null; running: boolean; visible: boolean }
-type AudienceSnapshot = { slide: PresentationSlide | null; alert: { text: string; mode: 'static' | 'scrolling' } | null; videoPlayback: VideoPlayback | null; theme: PresentationTheme; overlays: DisplayOverlay[]; countdown: CountdownFunction }
-type DisplaySummary = { index: number; name: string; x: number; y: number; width: number; height: number }
+type AudienceSnapshot = { slide: PresentationSlide | null; alert: MessageAlert | null; videoPlayback: VideoPlayback | null; theme: PresentationTheme; overlays: DisplayOverlay[]; countdown: CountdownFunction }
+type DisplaySummary = { index: number; id: string; name: string; x: number; y: number; width: number; height: number; isPrimary: boolean }
 type PendingProjectAction = { kind: 'leave' } | { kind: 'new' } | { kind: 'open'; id: number }
 type PresentationSummary = { id: number; title: string; updatedAt: string; slideCount: number }
+type PresentationFile = { id: string; filename: string; fileType: 'pdf' | 'ppt' | 'pptx' | 'pps' | 'ppsx' | 'odp'; mimeType: string; localPath: string; fileSize: number; pageCount: number; createdAt: string }
+type PowerPointSession = { fileId: string; slideCount: number; slideThumbnails: string[] }
 type SavedPresentation = { id: number; title: string; slides: PresentationSlide[] }
 type LiveFeedInfo = { streamId: string; streamUrl: string }
 type CameraSignal = { sourceId: string; sender?: 'operator' | 'audience'; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }
@@ -73,16 +101,51 @@ const presentationFeedLabels: Record<PresentationFeed, string> = {
 }
 
 function persistedSlides(slides: readonly PresentationSlide[]) {
-  return slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId, bodyOverride }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId, bodyOverride: bodyOverride ?? undefined }))
+  return slides.map(({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId, presentationFileId, documentPage, bodyOverride }) => ({ sourceId, title, subtitle, reference, kind, bookNumber, chapterNumber, verseNumber, translationId, songId, sectionIndex, mediaId, presentationFileId, documentPage, bodyOverride: bodyOverride ?? undefined }))
 }
 
 function displayBody(slide: PresentationSlide) { return slide.bodyOverride ?? slide.body }
 
+function themeStyle(theme: PresentationTheme): CSSProperties {
+  return { '--theme-bg': theme.kind === 'solid' ? theme.backgroundColor : '#080a09', '--theme-text': theme.textColor } as CSSProperties
+}
+
+function validThemeColor(value: unknown): value is string { return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value) }
+
+function normalizePresentationTheme(value: unknown): PresentationTheme | null {
+  if (typeof value === 'string') return builtInThemes.find((theme) => theme.id === value) ?? null
+  if (!value || typeof value !== 'object') return null
+  const item = value as Partial<PresentationTheme>
+  if (item.kind === 'solid' && typeof item.id === 'string' && typeof item.name === 'string' && validThemeColor(item.backgroundColor) && validThemeColor(item.textColor)) {
+    return { kind: 'solid', id: item.id, name: item.name, backgroundColor: item.backgroundColor, textColor: item.textColor }
+  }
+  if (item.kind === 'media' && typeof item.id === 'string' && typeof item.name === 'string' && typeof item.mediaId === 'string' && (item.mediaType === 'image' || item.mediaType === 'video') && typeof item.mediaPath === 'string' && validThemeColor(item.textColor)) {
+    return { kind: 'media', id: item.id, name: item.name, mediaId: item.mediaId, mediaType: item.mediaType, mediaPath: item.mediaPath, textColor: item.textColor }
+  }
+  return null
+}
+
 function loadPresentationTheme(): PresentationTheme {
   try {
     const value = localStorage.getItem('bibleshow-presentation-theme')
-    return value === 'warm' || value === 'midnight' ? value : 'classic'
-  } catch { return 'classic' }
+    if (!value) return defaultTheme
+    try { return normalizePresentationTheme(JSON.parse(value)) ?? normalizePresentationTheme(value) ?? defaultTheme }
+    catch { return normalizePresentationTheme(value) ?? defaultTheme }
+  } catch { return defaultTheme }
+}
+
+function loadCustomThemes(): SolidTheme[] {
+  try {
+    const values = JSON.parse(localStorage.getItem('bibleshow-custom-themes') ?? '[]') as unknown
+    if (!Array.isArray(values)) return []
+    return values.map(normalizePresentationTheme).filter((theme): theme is SolidTheme => theme?.kind === 'solid' && !builtInThemes.some((builtIn) => builtIn.id === theme.id))
+  } catch { return [] }
+}
+
+function persistableTheme(theme: PresentationTheme): PresentationTheme | Omit<LiveTheme, 'liveStreamUrl' | 'youtubeVideoId'> {
+  if (theme.kind === 'live') return { kind: 'live', id: theme.id, name: theme.name, sourceId: theme.sourceId, liveStreamKind: theme.liveStreamKind, textColor: theme.textColor }
+  if (theme.kind === 'media') return { ...theme, playbackUrl: undefined }
+  return theme
 }
 
 function loadDisplayOverlays(): DisplayOverlay[] {
@@ -93,8 +156,25 @@ function loadDisplayOverlays(): DisplayOverlay[] {
   } catch { return [] }
 }
 
+function loadSavedMessageAlerts(): SavedMessageAlert[] {
+  try {
+    const value = JSON.parse(localStorage.getItem('bibleshow-saved-message-alerts') ?? '[]') as unknown
+    if (!Array.isArray(value)) return []
+    return value.filter((item): item is SavedMessageAlert => item && typeof item.id === 'string' && typeof item.title === 'string' && typeof item.content === 'string')
+  } catch { return [] }
+}
+
+function messageAlertStyle(alert: MessageAlert, operator = false): CSSProperties {
+  const placement: CSSProperties = alert.position === 'top' ? { top: '2%', bottom: 'auto' } : alert.position === 'middle' ? { top: '50%', bottom: 'auto', transform: 'translateY(-50%)' } : { bottom: '0', top: 'auto' }
+  return { ...placement, color: alert.textColor, backgroundColor: alert.backgroundColor, fontSize: operator ? `clamp(8px, ${alert.fontSize * 0.45}vw, 24px)` : `clamp(18px, ${alert.fontSize}vw, 84px)`, '--alert-repeat-count': alert.repeatCount ?? 'infinite' } as CSSProperties
+}
+
 function projectSnapshot(title: string, slides: readonly PresentationSlide[]) {
   return JSON.stringify({ title, slides: persistedSlides(slides) })
+}
+
+function preferredDisplayId(displays: readonly DisplaySummary[]) {
+  return displays.find((display) => !display.isPrimary)?.id ?? displays[0]?.id ?? ''
 }
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
@@ -107,6 +187,7 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
     moon: <path d="M20.8 14.2A8.5 8.5 0 0 1 9.8 3.2 8.5 8.5 0 1 0 20.8 14.2Z" />,
     arrow: <><path d="M5 12h14m-6-6 6 6-6 6" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
+    import: <><path d="M12 3v12m-5-5 5 5 5-5" /><path d="M5 19h14" /></>,
     spark: <><path d="m12 3 1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2L12 3Z" /><path d="m19 14 .9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14Z" /></>,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.5 2" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.8 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.8-1l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2l-1.4-1.1 1.4-2.4 1.7.7a8 8 0 0 1 1.8-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.8 1l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1 0 2Z" transform="translate(-1 -1)" /></>,
@@ -257,11 +338,13 @@ function HomePage({ onNavigate, library, importState, onImport, onRefreshLibrary
   )
 }
 
-function ResourceImportPanel({ onImported, mode = 'all' }: { onImported: () => void; mode?: 'all' | 'bible' | 'lyrics' }) {
+function ResourceImportPanel({ onImported, mode = 'all' }: { onImported: (complete?: boolean) => void; mode?: 'all' | 'bible' | 'lyrics' }) {
   const [translationId, setTranslationId] = useState('')
   const [translationName, setTranslationName] = useState('')
   const [language, setLanguage] = useState('en')
   const [category, setCategory] = useState<'hymn' | 'song'>('hymn')
+  const [lyricsFormat, setLyricsFormat] = useState<'auto' | 'xml' | 'txt' | 'csv'>('auto')
+  const [importMode, setImportMode] = useState<'single' | 'batch'>('batch')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState(false)
@@ -275,14 +358,47 @@ function ResourceImportPanel({ onImported, mode = 'all' }: { onImported: () => v
     setBusy(true); setMessage('Reading selected files…'); setError(false)
     try {
       if (kind === 'lyrics') {
-        for (const [index, file] of selectedFiles.entries()) {
-          setMessage('Importing ' + file.name + ' (' + (index + 1) + '/' + selectedFiles.length + ')…')
-          const payload = { category, files: [{ filename: file.name, content: await file.text() }] }
-          const result = await invoke<{ imported: number; skipped: number; detail: string }>('import_lyrics_resources', new TextEncoder().encode(JSON.stringify(payload)))
-          imported += result.imported
-          skipped += result.skipped
-          completed += 1
+        const encoder = new TextEncoder()
+        const maxBatchFiles = 128
+        const maxBatchBytes = 6 * 1024 * 1024
+        let batch: File[] = []
+        let batchBytes = 0
+        async function sendBatch(files: { filename: string; content: string }[]) {
+          if (files.length > 1) {
+            const bytes = encoder.encode(JSON.stringify({ category, files }))
+            if (bytes.byteLength > 8 * 1024 * 1024) {
+              const midpoint = Math.ceil(files.length / 2)
+              await sendBatch(files.slice(0, midpoint))
+              await sendBatch(files.slice(midpoint))
+              return
+            }
+            const result = await invoke<{ imported: number; skipped: number; detail: string }>('import_lyrics_resources', bytes)
+            imported += result.imported
+            skipped += result.skipped
+          } else {
+            const result = await invoke<{ imported: number; skipped: number; detail: string }>('import_lyrics_resources', encoder.encode(JSON.stringify({ category, files })))
+            imported += result.imported
+            skipped += result.skipped
+          }
+          completed += files.length
+          setMessage(`Imported ${completed} of ${selectedFiles.length} files…`)
         }
+        async function flushBatch() {
+          if (!batch.length) return
+          const files = batch
+          batch = []
+          batchBytes = 0
+          setMessage(`Reading ${files.length} files (${completed} of ${selectedFiles.length} completed)…`)
+          const contents = await Promise.all(files.map(async (file) => ({ filename: file.name, content: await file.text() })))
+          await sendBatch(contents)
+        }
+        for (const file of selectedFiles) {
+          if (batch.length && (batch.length >= maxBatchFiles || batchBytes + file.size > maxBatchBytes)) await flushBatch()
+          batch.push(file)
+          batchBytes += file.size
+          if (batch.length >= maxBatchFiles || batchBytes >= maxBatchBytes) await flushBatch()
+        }
+        await flushBatch()
         setMessage('Imported ' + imported + ' lyrics resources; skipped ' + skipped + ' duplicates or empty items.')
       } else {
         const files = await Promise.all(selectedFiles.map(async (file) => ({ filename: file.name, content: await file.text() })))
@@ -291,18 +407,19 @@ function ResourceImportPanel({ onImported, mode = 'all' }: { onImported: () => v
         setMessage(result.detail)
         completed = selectedFiles.length
       }
-      onImported()
+      onImported(true)
     } catch (reason) {
-      if (completed) onImported()
+      if (completed) onImported(false)
       setMessage(completed ? 'Stopped after ' + completed + ' files. Added ' + imported + ' lyrics and skipped ' + skipped + '. ' + String(reason) : String(reason))
       setError(true)
     } finally { setBusy(false) }
   }
 
   const heading = mode === 'all' ? 'Add library resources' : mode === 'bible' ? 'Import Bible' : 'Import lyrics'
-  return <section className={'library-panel resource-import-panel' + (mode === 'all' ? '' : ' feed-resource-import')} aria-labelledby="resource-import-heading">
+  const lyricsAccept = lyricsFormat === 'auto' ? '.xml,.ost,.txt,.csv' : lyricsFormat === 'xml' ? '.xml,.ost' : `.${lyricsFormat}`
+  return <section className={'library-panel resource-import-panel' + (mode === 'all' ? '' : ' feed-resource-import')} aria-labelledby={`resource-import-heading-${mode}`}>
     <div className="library-copy">
-      <div className="section-heading"><div><span className="section-icon"><Icon name="plus" size={17} /></span><h2 id="resource-import-heading">{heading}</h2></div>{mode === 'all' && <span className="muted-label">OFFLINE IMPORT</span>}</div>
+      <div className="section-heading"><div><span className="section-icon"><Icon name="plus" size={17} /></span><h2 id={`resource-import-heading-${mode}`}>{heading}</h2></div>{mode === 'all' && <span className="muted-label">OFFLINE IMPORT</span>}</div>
       <p className="library-status">{mode === 'bible' ? 'Import USFM, USX, OSIS, Zefania, or BibleShow XML Bible files.' : mode === 'lyrics' ? 'Import OpenLyrics or OpenSong XML, TXT, and CSV songs.' : 'Add Bible versions or song libraries. BibleShow accepts USFM/USX, OSIS, Zefania, BibleShow XML, OpenLyrics/OpenSong XML, TXT, and CSV.'}</p>
       {message && <p className={'import-message' + (error ? ' is-error' : '')} role="status">{message}</p>}
       <div className="resource-import-fields">
@@ -314,14 +431,40 @@ function ResourceImportPanel({ onImported, mode = 'all' }: { onImported: () => v
         </fieldset>}
         {mode !== 'bible' && <fieldset disabled={busy || !isTauri()}><legend>Lyrics</legend>
           <select aria-label="Default lyrics category" value={category} onChange={(event) => setCategory(event.target.value as 'hymn' | 'song')}><option value="hymn">Hymns</option><option value="song">Songs</option></select>
-          <label className="import-button"><span>{busy ? 'Importing…' : 'Choose lyrics files'}</span><input type="file" accept=".xml,.ost,.txt,.csv" multiple disabled={busy || !isTauri()} onChange={(event) => { void importFiles('lyrics', event.currentTarget.files); event.currentTarget.value = '' }} /></label>
+          <label>File format<select aria-label="Lyrics import format" value={lyricsFormat} onChange={(event) => setLyricsFormat(event.target.value as typeof lyricsFormat)}><option value="auto">Detect from extension</option><option value="xml">OpenLyrics / OpenSong XML</option><option value="txt">Plain text</option><option value="csv">CSV collection</option></select></label>
+          <label>Import mode<select aria-label="Lyrics import mode" value={importMode} onChange={(event) => setImportMode(event.target.value as typeof importMode)}><option value="single">Single file</option><option value="batch">Multiple files</option></select></label>
+          <label className="import-button"><span>{busy ? 'Importing…' : importMode === 'batch' ? 'Choose lyrics files' : 'Choose lyrics file'}</span><input type="file" accept={lyricsAccept} multiple={importMode === 'batch'} disabled={busy || !isTauri()} onChange={(event) => { void importFiles('lyrics', event.currentTarget.files); event.currentTarget.value = '' }} /></label>
         </fieldset>}
       </div>
     </div>
   </section>
 }
+
+function ResourceImportDialog({ mode, onImported, onDismiss, openRequest = 0 }: { mode: 'bible' | 'lyrics'; onImported: () => void; onDismiss?: () => void; openRequest?: number }) {
+  const [open, setOpen] = useState(openRequest > 0)
+  const title = mode === 'bible' ? 'Import Bible' : 'Import lyrics'
+  function close() { setOpen(false); onDismiss?.() }
+
+  useEffect(() => {
+    if (!open) return
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open])
+
+  return <>
+    <button type="button" className="feed-import-trigger" aria-label={title} title={title} onClick={() => setOpen(true)}><Icon name="import" size={16} /></button>
+    {open && <div className="resource-import-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close() }}>
+      <section className="resource-import-dialog" role="dialog" aria-modal="true" aria-label={title}>
+        <header><strong>{title}</strong><button type="button" aria-label="Close import dialog" onClick={close}>×</button></header>
+        <ResourceImportPanel mode={mode} onImported={(complete = true) => { onImported(); if (complete) close() }} />
+      </section>
+    </div>}
+  </>
+}
 function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => void; onRefreshLibrary: () => void }) {
   const [activeFeed, setActiveFeed] = useState<PresentationFeed>('bible')
+  const [feedSearchQuery, setFeedSearchQuery] = useState('')
   const [resourceRevision, setResourceRevision] = useState(0)
   const [liveFeedSlide, setLiveFeedSlide] = useState<PresentationSlide | null>(null)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
@@ -342,27 +485,168 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
   const [pendingProjectAction, setPendingProjectAction] = useState<PendingProjectAction | null>(null)
   const [persistenceMessage, setPersistenceMessage] = useState('')
   const [persistenceBusy, setPersistenceBusy] = useState(false)
-  const [paneSizes, setPaneSizes] = useState({ left: 250, right: 245, centerTop: 390 })
+  const [paneSizes, setPaneSizes] = useState({ left: 250, right: 245, centerTop: 320 })
   const [toolbarPanel, setToolbarPanel] = useState<string | null>(null)
+  const [selectedSongIds, setSelectedSongIds] = useState<string[]>([])
+  const [songEditorRequest, setSongEditorRequest] = useState<{ songId: string | null; request: number } | null>(null)
+  const [songExportRequest, setSongExportRequest] = useState<{ songIds: string[]; request: number } | null>(null)
+  const [lyricsImportRequest, setLyricsImportRequest] = useState(0)
   const [liveDisplayOpen, setLiveDisplayOpen] = useState(true)
   const [audienceWindowOpen, setAudienceWindowOpen] = useState(false)
   const [displays, setDisplays] = useState<DisplaySummary[]>([])
   const [selectedDisplay, setSelectedDisplay] = useState('')
+  const [displayError, setDisplayError] = useState('')
+  const userSelectedDisplay = useRef(false)
+  const audienceAutoStartAttempted = useRef(false)
+  const audienceOutputDismissed = useRef(false)
+  const audienceDisplayTarget = useRef<string | null>(null)
+  const displayRefreshInFlight = useRef(false)
+  const [alertTitleDraft, setAlertTitleDraft] = useState('')
   const [alertDraft, setAlertDraft] = useState('')
   const [alertMode, setAlertMode] = useState<'static' | 'scrolling'>('static')
-  const [activeAlert, setActiveAlert] = useState<{ text: string; mode: 'static' | 'scrolling' } | null>(null)
+  const [alertPosition, setAlertPosition] = useState<MessageAlert['position']>('bottom')
+  const [alertFontSize, setAlertFontSize] = useState(2.7)
+  const [alertTextColor, setAlertTextColor] = useState('#ffffff')
+  const [alertBackgroundColor, setAlertBackgroundColor] = useState('#852323')
+  const [alertStaticDuration, setAlertStaticDuration] = useState(10)
+  const [alertRepeatCount, setAlertRepeatCount] = useState(3)
+  const [alertRepeatForever, setAlertRepeatForever] = useState(false)
+  const [savedAlerts, setSavedAlerts] = useState<SavedMessageAlert[]>(loadSavedMessageAlerts)
+  const [alertLibrarySearch, setAlertLibrarySearch] = useState('')
+  const [activeAlert, setActiveAlert] = useState<MessageAlert | null>(null)
   const [presentationTheme, setPresentationTheme] = useState<PresentationTheme>(loadPresentationTheme)
+  const [powerpointSession, setPowerPointSession] = useState<PowerPointSession | null>(null)
+
+  const refreshDisplays = useCallback(async () => {
+    if (!isTauri() || displayRefreshInFlight.current) return
+    displayRefreshInFlight.current = true
+    try {
+      const items = await invoke<DisplaySummary[]>('get_available_displays')
+      setDisplays((current) => JSON.stringify(current) === JSON.stringify(items) ? current : items)
+      setSelectedDisplay((current) => {
+        if (userSelectedDisplay.current && items.some((item) => item.id === current)) return current
+        if (userSelectedDisplay.current && !items.some((item) => item.id === current)) userSelectedDisplay.current = false
+        return preferredDisplayId(items)
+      })
+      setDisplayError('')
+    } catch (error) { setDisplayError(String(error)) }
+    finally { displayRefreshInFlight.current = false }
+  }, [])
+
+  function showAlert() {
+    const text = alertDraft.trim()
+    if (!text) return
+    setActiveAlert({ id: crypto.randomUUID(), text, mode: alertMode, position: alertPosition, fontSize: alertFontSize, textColor: alertTextColor, backgroundColor: alertBackgroundColor, staticDurationSeconds: alertStaticDuration, repeatCount: alertMode === 'scrolling' ? alertRepeatForever ? null : alertRepeatCount : null })
+  }
+
+  function saveAlertToLibrary() {
+    const title = alertTitleDraft.trim()
+    const content = alertDraft.trim()
+    if (!title || !content) return
+    const id = savedAlerts.find((item) => item.title.toLocaleLowerCase() === title.toLocaleLowerCase())?.id ?? crypto.randomUUID()
+    setSavedAlerts((items) => [...items.filter((item) => item.id !== id), { id, title, content }])
+  }
+
+  function loadAlertFromLibrary(alert: SavedMessageAlert) {
+    setAlertTitleDraft(alert.title)
+    setAlertDraft(alert.content)
+  }
 
   function refreshImportedResources() {
     setResourceRevision((revision) => revision + 1)
     onRefreshLibrary()
+  }
+  function openSongEditor(songId: string | null) {
+    setSongEditorRequest((current) => ({ songId, request: (current?.request ?? 0) + 1 }))
+    setToolbarPanel(null)
+  }
+  function openSongExport(songIds: string[]) {
+    const ids = [...new Set(songIds)]
+    if (!ids.length) return
+    setSongExportRequest((current) => ({ songIds: ids, request: (current?.request ?? 0) + 1 }))
+    setToolbarPanel(null)
+  }
+  async function deleteLibrarySongs(songIds: string[]) {
+    const ids = [...new Set(songIds)]
+    if (!ids.length) return
+    const noun = ids.length === 1 ? 'song' : 'songs'
+    if (!window.confirm(`Permanently delete ${ids.length} ${noun} from the lyrics library?`)) return
+    if (!isTauri()) { setPersistenceMessage('Open BibleShow in the desktop app to delete library songs.'); return }
+    try {
+      const deleted = await invoke<number>('delete_songs', { songIds: ids })
+      const removedIndexes = new Set(sequence.map((item, index) => ids.includes(item.songId ?? '') ? index : -1).filter((index) => index >= 0))
+      setSequence((items) => items.filter((item) => !ids.includes(item.songId ?? '')))
+      if (previewSlide?.songId && ids.includes(previewSlide.songId)) stagePreview(null, null)
+      else if (previewPosition !== null) setPreviewPosition(previewPosition - [...removedIndexes].filter((index) => index < previewPosition).length)
+      if (liveSlide?.songId && ids.includes(liveSlide.songId)) { setLiveSlide(null); setLivePosition(null); setLivePlayback(null) }
+      else if (livePosition !== null) setLivePosition(livePosition - [...removedIndexes].filter((index) => index < livePosition).length)
+      setSelectedSongIds((current) => current.filter((id) => !ids.includes(id)))
+      setResourceRevision((revision) => revision + 1)
+      setPersistenceMessage(`Deleted ${deleted} ${deleted === 1 ? 'song' : 'songs'} from the lyrics library.`)
+    } catch (error) { setPersistenceMessage(String(error)) }
+  }
+  async function openExternalPresentationFile(fileId: string) {
+    if (!isTauri()) { setPersistenceMessage('Open BibleShow in the desktop app to open PowerPoint files.'); return }
+    try {
+      await invoke('open_external_presentation_file', { fileId })
+      setPersistenceMessage('Opened with the app associated with this presentation file.')
+    } catch (error) { setPersistenceMessage(String(error)) }
+  }
+  const startPowerPointSession = useCallback(async (fileId: string): Promise<PowerPointSession | null> => {
+    if (!isTauri()) { setPersistenceMessage('Open BibleShow in the desktop app to control PowerPoint.'); return null }
+    try {
+      const session = await invoke<PowerPointSession>('start_powerpoint_presentation', { fileId })
+      setPowerPointSession(session)
+      setSequence((items) => items.map((item) => item.kind === 'powerpoint' && item.presentationFileId === session.fileId
+        ? { ...item, pageCount: session.slideCount, mediaPath: session.slideThumbnails[(item.documentPage ?? 1) - 1] ?? item.mediaPath, liveStreamUrl: undefined }
+        : item))
+      setPreviewSlide((slide) => slide?.kind === 'powerpoint' && slide.presentationFileId === session.fileId
+        ? { ...slide, pageCount: session.slideCount, mediaPath: session.slideThumbnails[(slide.documentPage ?? 1) - 1] ?? slide.mediaPath, liveStreamUrl: undefined }
+        : slide)
+      if (liveSlide?.kind === 'powerpoint') {
+        const isSameFile = liveSlide.presentationFileId === session.fileId
+        const updatedLive = isSameFile ? { ...liveSlide, pageCount: session.slideCount, mediaPath: session.slideThumbnails[(liveSlide.documentPage ?? 1) - 1] ?? liveSlide.mediaPath, liveStreamUrl: undefined } : liveSlide
+        if (isSameFile && (liveSlide.documentPage ?? 1) > 1) {
+          await invoke('navigate_powerpoint_slide', { request: { fileId: session.fileId, page: liveSlide.documentPage } })
+        }
+        setLiveSlide(updatedLive)
+      }
+      setPersistenceMessage(`PowerPoint is ready. ${session.slideCount} slides are available in BibleShow.`)
+      return session
+    } catch (error) { setPersistenceMessage(String(error)); return null }
+  }, [liveSlide])
+  const stopPowerPointSession = useCallback(async () => {
+    if (!isTauri()) return
+    try {
+      await invoke('stop_powerpoint_presentation')
+      setPowerPointSession(null)
+      setSequence((items) => items.map((item) => item.kind === 'powerpoint' ? { ...item, liveStreamUrl: undefined } : item))
+      setPreviewSlide((slide) => slide?.kind === 'powerpoint' ? { ...slide, liveStreamUrl: undefined } : slide)
+      setLiveSlide((slide) => slide?.kind === 'powerpoint' ? { ...slide, liveStreamUrl: undefined } : slide)
+      setPersistenceMessage('PowerPoint is no longer connected to BibleShow.')
+    } catch (error) { setPersistenceMessage(String(error)) }
+  }, [])
+  async function deletePresentationFile(fileId: string) {
+    if (!window.confirm('Delete this presentation file from the local library? Saved shows that use its PDF pages will lose those pages.')) return
+    if (!isTauri()) { setPersistenceMessage('Open BibleShow in the desktop app to delete presentation files.'); return }
+    try {
+      await invoke('delete_presentation_file', { fileId })
+      const removed = new Set(sequence.map((item, index) => item.presentationFileId === fileId ? index : -1).filter((index) => index >= 0))
+      setSequence((items) => items.filter((item) => item.presentationFileId !== fileId))
+      if (previewSlide?.presentationFileId === fileId) stagePreview(null, null)
+      else if (previewPosition !== null) setPreviewPosition(previewPosition - [...removed].filter((index) => index < previewPosition).length)
+      if (liveSlide?.presentationFileId === fileId) { setLiveSlide(null); setLivePosition(null); setLivePlayback(null) }
+      else if (livePosition !== null) setLivePosition(livePosition - [...removed].filter((index) => index < livePosition).length)
+      await refreshPresentations()
+      setPersistenceMessage('Presentation file deleted from the local library.')
+    } catch (error) { setPersistenceMessage(String(error)) }
   }
   const [overlays, setOverlays] = useState<DisplayOverlay[]>(loadDisplayOverlays)
   const [countdown, setCountdown] = useState<CountdownFunction>({ durationSeconds: 300, remainingSeconds: 300, endsAtMs: null, running: false, visible: false })
   const liveSequenceIndex = livePosition ?? (liveSlide ? sequence.findIndex((item) => item.sourceId === liveSlide.sourceId) : -1)
   const nextSlide = liveSequenceIndex >= 0 ? sequence[liveSequenceIndex + 1] ?? null : sequence[0] ?? null
   const hasUnsavedProjectChanges = projectSnapshot(presentationTitle, sequence) !== savedProjectSnapshot
-  const audienceSnapshot = useRef<AudienceSnapshot>({ slide: null, alert: null, videoPlayback: null, theme: 'classic', overlays: [], countdown: { durationSeconds: 300, remainingSeconds: 300, endsAtMs: null, running: false, visible: false } })
+  const audienceSnapshot = useRef<AudienceSnapshot>({ slide: null, alert: null, videoPlayback: null, theme: defaultTheme, overlays: [], countdown: { durationSeconds: 300, remainingSeconds: 300, endsAtMs: null, running: false, visible: false } })
   const previewPlaybackRef = useRef<VideoPlayback | null>(null)
   const previewSlideRef = useRef<PresentationSlide | null>(null)
   const playbackCommandId = useRef(0)
@@ -377,12 +661,32 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
   }, [previewPlayback, previewSlide, liveSlide, activeAlert, livePlayback, liveFeedSlide, presentationTheme, overlays, countdown])
 
   useEffect(() => {
-    try { localStorage.setItem('bibleshow-presentation-theme', presentationTheme) } catch { /* Theme remains available for this session. */ }
+    try {
+      if (presentationTheme.kind === 'live') localStorage.removeItem('bibleshow-presentation-theme')
+      else localStorage.setItem('bibleshow-presentation-theme', JSON.stringify(persistableTheme(presentationTheme)))
+    } catch { /* Theme remains available for this session. */ }
   }, [presentationTheme])
+
+  useEffect(() => {
+    if (presentationTheme.kind === 'live' && liveFeedSlide?.sourceId !== presentationTheme.sourceId) setPresentationTheme(defaultTheme)
+  }, [liveFeedSlide, presentationTheme])
 
   useEffect(() => {
     try { localStorage.setItem('bibleshow-display-overlays', JSON.stringify(overlays)) } catch { /* Overlay definitions remain available for this session. */ }
   }, [overlays])
+
+  useEffect(() => {
+    try { localStorage.setItem('bibleshow-saved-message-alerts', JSON.stringify(savedAlerts)) } catch { setPersistenceMessage('Could not save the message alert library on this device.') }
+  }, [savedAlerts])
+
+  useEffect(() => {
+    if (!activeAlert) return
+    const duration = activeAlert.mode === 'static' ? activeAlert.staticDurationSeconds * 1000 : activeAlert.repeatCount === null ? null : activeAlert.repeatCount * 18_000
+    if (duration === null) return
+    const alertId = activeAlert.id
+    const timeout = window.setTimeout(() => setActiveAlert((current) => current?.id === alertId ? null : current), duration)
+    return () => window.clearTimeout(timeout)
+  }, [activeAlert])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -430,10 +734,40 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
 
   useEffect(() => {
     if (!isTauri()) return
-    invoke<DisplaySummary[]>('get_available_displays').then((items) => {
-      setDisplays(items)
-      if (items.length) setSelectedDisplay(String(items.length > 1 ? 1 : 0))
+    void refreshDisplays()
+    const timer = window.setInterval(() => void refreshDisplays(), 2500)
+    return () => window.clearInterval(timer)
+  }, [refreshDisplays])
+
+  useEffect(() => {
+    if (audienceWindowOpen || audienceOutputDismissed.current || audienceAutoStartAttempted.current || displays.length < 2 || !selectedDisplay) return
+    audienceAutoStartAttempted.current = true
+    const displayId = selectedDisplay
+    void invoke('set_audience_window_visible', { visible: true, displayId }).then(() => {
+      audienceDisplayTarget.current = displayId
+      setAudienceWindowOpen(true)
     }).catch((error) => setPersistenceMessage(String(error)))
+  }, [audienceWindowOpen, displays.length, selectedDisplay])
+
+  useEffect(() => {
+    if (!audienceWindowOpen || !selectedDisplay || audienceDisplayTarget.current === selectedDisplay) return
+    void invoke('set_audience_window_visible', { visible: true, displayId: selectedDisplay }).then(() => {
+      audienceDisplayTarget.current = selectedDisplay
+    }).catch((error) => setPersistenceMessage(String(error)))
+  }, [audienceWindowOpen, selectedDisplay])
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    invoke<PowerPointSession | null>('get_active_powerpoint_session').then((session) => {
+      if (active && session) {
+        setPowerPointSession(session)
+        setSequence((items) => items.map((item) => item.kind === 'powerpoint' && item.presentationFileId === session.fileId
+          ? { ...item, pageCount: session.slideCount, mediaPath: session.slideThumbnails[(item.documentPage ?? 1) - 1] ?? item.mediaPath, liveStreamUrl: undefined }
+          : item))
+      }
+    }).catch(() => undefined)
+    return () => { active = false }
   }, [])
 
   useEffect(() => {
@@ -462,7 +796,9 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
   async function toggleAudienceWindow(visible: boolean) {
     if (!isTauri()) { setPersistenceMessage('Open BibleShow in the desktop app to use audience output.'); return }
     try {
-      await invoke('set_audience_window_visible', { visible, displayIndex: selectedDisplay === '' ? null : Number(selectedDisplay) })
+      await invoke('set_audience_window_visible', { visible, displayId: selectedDisplay || null })
+      if (!visible) audienceOutputDismissed.current = true
+      audienceDisplayTarget.current = visible ? selectedDisplay : null
       setAudienceWindowOpen(visible)
     } catch (error) { setPersistenceMessage(String(error)) }
   }
@@ -510,8 +846,26 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
     } catch (error) { setPersistenceMessage(String(error)) }
   }
   const [bibleSearchMode, setBibleSearchMode] = useState<'reference' | 'keyword'>('reference')
-  const [bibleSearchQuery, setBibleSearchQuery] = useState('')
   const [bibleSearchRequest, setBibleSearchRequest] = useState<{ mode: 'reference' | 'keyword'; query: string; id: number } | null>(null)
+  const [bibleBookNames, setBibleBookNames] = useState<string[]>([])
+  const [bookSuggestionsVisible, setBookSuggestionsVisible] = useState(false)
+  const [activeBookSuggestion, setActiveBookSuggestion] = useState(-1)
+  const [lyricsPresentRequest, setLyricsPresentRequest] = useState<{ query: string; id: number } | null>(null)
+  const updateBibleBookNames = useCallback((names: string[]) => setBibleBookNames(names), [])
+
+  function submitFeedSearch() {
+    const query = feedSearchQuery.trim()
+    if (!query) return
+    setBookSuggestionsVisible(false)
+    if (activeFeed === 'bible') setBibleSearchRequest((current) => ({ mode: bibleSearchMode, query, id: (current?.id ?? 0) + 1 }))
+    if (activeFeed === 'lyrics') setLyricsPresentRequest((current) => ({ query, id: (current?.id ?? 0) + 1 }))
+  }
+
+  function chooseBookSuggestion(name: string) {
+    setFeedSearchQuery(`${name} `)
+    setBookSuggestionsVisible(false)
+    setActiveBookSuggestion(-1)
+  }
 
   function startPaneResize(event: ReactPointerEvent<HTMLDivElement>, pane: 'left' | 'right' | 'centerTop') {
     event.preventDefault()
@@ -538,14 +892,25 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
     window.addEventListener('pointercancel', onUp)
   }
 
-  function handleSourceDrop(event: ReactDragEvent<HTMLDivElement>) {
+  function handleSourceDrop(event: ReactDragEvent<HTMLDivElement>, position = sequence.length) {
     event.preventDefault()
+    event.stopPropagation()
+    const queueId = event.dataTransfer.getData('text/bibleshow-queue-id')
+    if (queueId) {
+      const source = sequence.findIndex((item) => item.queueId === queueId)
+      const insertion = Math.max(0, Math.min(sequence.length, position))
+      if (source >= 0) moveSequenceToPosition(source, source < insertion ? insertion - 1 : insertion)
+      return
+    }
     const raw = event.dataTransfer.getData('text/bibleshow-slide')
     if (!raw) return
     try {
       const slide = JSON.parse(raw) as PresentationSlide
-      if (!['scripture', 'lyrics', 'image', 'video'].includes(slide.kind) || !slide.sourceId || ((slide.kind === 'image' || slide.kind === 'video') ? !slide.mediaId || !slide.mediaPath : !slide.body)) return
-      addToSequence(slide)
+      const textSlide = slide.kind === 'scripture' || slide.kind === 'lyrics'
+      const mediaSlide = slide.kind === 'image' || slide.kind === 'video'
+      const presentationSlide = slide.kind === 'pdf' || slide.kind === 'powerpoint'
+      if (!slide.sourceId || !(textSlide || mediaSlide || presentationSlide) || (textSlide && !slide.body) || (mediaSlide && (!slide.mediaId || !slide.mediaPath)) || (presentationSlide && (!slide.presentationFileId || !slide.documentPage))) return
+      if (!addToSequence(slide, position)) return
       setPersistenceMessage(`${slide.title} added to this show.`)
     } catch {
       setPersistenceMessage('That item could not be added to this show.')
@@ -613,7 +978,7 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
     setPersistenceBusy(true)
     try {
       const saved = await invoke<SavedPresentation>('load_presentation', { presentationId: id })
-      const items = saved.slides.map((slide) => ({ ...slide, queueId: crypto.randomUUID() }))
+      const items = saved.slides.map((slide) => ({ ...slide, ...(powerpointSession && slide.kind === 'powerpoint' && powerpointSession.fileId === slide.presentationFileId ? { pageCount: powerpointSession.slideCount, mediaPath: powerpointSession.slideThumbnails[(slide.documentPage ?? 1) - 1] ?? slide.mediaPath, liveStreamUrl: undefined } : {}), queueId: crypto.randomUUID() }))
       setPresentationId(saved.id)
       setPresentationTitle(saved.title)
       setSavedProjectSnapshot(projectSnapshot(saved.title, saved.slides))
@@ -712,19 +1077,34 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
     changeVideoPlayback(target, sourceId, { currentTime, duration }, false)
   }
 
-  function addToSequence(slide: PresentationSlide) {
+  function addToSequence(slide: PresentationSlide, requestedPosition = sequence.length): boolean {
+    if (sequence.length >= 500) { setPersistenceMessage('A saved show can contain up to 500 slides. Remove a slide before adding another.'); return false }
     const item = { ...slide, queueId: crypto.randomUUID() }
-    const position = sequence.length
-    setSequence((items) => [...items, item])
+    const position = Math.max(0, Math.min(sequence.length, requestedPosition))
+    setSequence((items) => [...items.slice(0, position), item, ...items.slice(position)])
+    if (livePosition !== null && livePosition >= position) setLivePosition(livePosition + 1)
     stagePreview(item, position)
+    return true
   }
 
   function addManyToSequence(slides: PresentationSlide[]) {
     if (!slides.length) return
+    if (sequence.length + slides.length > 500) { setPersistenceMessage(`A saved show can contain up to 500 slides. There is room for ${Math.max(0, 500 - sequence.length)} more.`); return }
     const items = slides.map((slide) => ({ ...slide, queueId: crypto.randomUUID() }))
     const position = sequence.length
     setSequence((current) => [...current, ...items])
     stagePreview(items[0], position)
+  }
+
+  function presentSlides(slides: PresentationSlide[]) {
+    if (!slides.length) return
+    if (sequence.length + slides.length > 500) { setPersistenceMessage(`A saved show can contain up to 500 slides. There is room for ${Math.max(0, 500 - sequence.length)} more.`); return }
+    const items = slides.map((slide) => ({ ...slide, queueId: crypto.randomUUID() }))
+    const position = sequence.length
+    setSequence((current) => [...current, ...items])
+    stagePreview(items[0], position)
+    sendLive(items[0], position)
+    setPersistenceMessage(`${items.length} slides sent to Preview and Live.`)
   }
 
   function selectPreviewPosition(position: number) {
@@ -734,23 +1114,50 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
   }
 
   function movePreview(direction: -1 | 1) {
+    if (previewSlide?.kind === 'powerpoint' && previewPosition === null && previewSlide.pageCount) {
+      const page = Math.max(1, Math.min(previewSlide.pageCount, (previewSlide.documentPage ?? 1) + direction))
+      const next = { ...previewSlide, sourceId: `presentation-file:${previewSlide.presentationFileId}:${page}`, subtitle: `Slide ${page}`, documentPage: page, mediaPath: undefined }
+      if (powerpointSession?.fileId === previewSlide.presentationFileId) {
+        void invoke<string>('export_powerpoint_slide_preview', { request: { fileId: previewSlide.presentationFileId, page } })
+          .then((mediaPath) => stagePreview({ ...next, mediaPath }, null))
+          .catch((error) => setPersistenceMessage(String(error)))
+      } else stagePreview(next, null)
+      return
+    }
+    if (previewSlide?.kind === 'pdf' && previewPosition === null && previewSlide.pageCount) {
+      const page = Math.max(1, Math.min(previewSlide.pageCount, (previewSlide.documentPage ?? 1) + direction))
+      stagePreview({ ...previewSlide, sourceId: `presentation-file:${previewSlide.presentationFileId}:${page}`, subtitle: `Page ${page}`, documentPage: page }, null)
+      return
+    }
     if (!sequence.length) return
     const current = previewPosition ?? (direction > 0 ? -1 : sequence.length)
     selectPreviewPosition(Math.max(0, Math.min(sequence.length - 1, current + direction)))
   }
 
-  const sendLive = useCallback((slide: PresentationSlide, position: number | null) => {
-    if (slide.kind === 'video') {
-      const previewState = previewPlaybackRef.current?.sourceId === slide.sourceId ? previewPlaybackRef.current : null
+  const sendLive = useCallback(async (slide: PresentationSlide, position: number | null) => {
+    let liveItem = slide
+    if (slide.kind === 'powerpoint' && slide.presentationFileId) {
+      let session = powerpointSession?.fileId === slide.presentationFileId ? powerpointSession : null
+      if (!session) session = await startPowerPointSession(slide.presentationFileId)
+      if (!session) return
+      const page = slide.documentPage ?? 1
+      try {
+        await invoke('navigate_powerpoint_slide', { request: { fileId: slide.presentationFileId, page } })
+        const mediaPath = await invoke<string>('export_powerpoint_slide_preview', { request: { fileId: slide.presentationFileId, page } })
+        liveItem = { ...slide, pageCount: session.slideCount, mediaPath, liveStreamUrl: undefined }
+      } catch (error) { setPersistenceMessage(String(error)); return }
+    }
+    if (liveItem.kind === 'video') {
+      const previewState = previewPlaybackRef.current?.sourceId === liveItem.sourceId ? previewPlaybackRef.current : null
       const startAtMs = currentTimeMs() + (delayLiveVideo ? 1000 : 0)
-      setLivePlayback(makeVideoPlayback(slide.sourceId, previewState?.currentTime ?? 0, previewState?.isPlaying ?? true, previewState?.loop ?? true, startAtMs))
+      setLivePlayback(makeVideoPlayback(liveItem.sourceId, previewState?.currentTime ?? 0, previewState?.isPlaying ?? true, previewState?.loop ?? true, startAtMs))
     } else {
       setLivePlayback(null)
     }
-    setLiveSlide(slide)
+    setLiveSlide(liveItem)
     setLivePosition(position)
     setLiveDisplayOpen(true)
-  }, [delayLiveVideo])
+  }, [delayLiveVideo, powerpointSession, startPowerPointSession])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -765,6 +1172,16 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
   }, [previewSlide, previewPosition, sendLive])
 
   function moveLive(direction: -1 | 1) {
+    if (liveSlide?.kind === 'powerpoint' && livePosition === null && liveSlide.pageCount) {
+      const page = Math.max(1, Math.min(liveSlide.pageCount, (liveSlide.documentPage ?? 1) + direction))
+      void sendLive({ ...liveSlide, sourceId: `presentation-file:${liveSlide.presentationFileId}:${page}`, subtitle: `Slide ${page}`, documentPage: page }, null)
+      return
+    }
+    if (liveSlide?.kind === 'pdf' && livePosition === null && liveSlide.pageCount) {
+      const page = Math.max(1, Math.min(liveSlide.pageCount, (liveSlide.documentPage ?? 1) + direction))
+      setLiveSlide({ ...liveSlide, sourceId: `presentation-file:${liveSlide.presentationFileId}:${page}`, subtitle: `Page ${page}`, documentPage: page })
+      return
+    }
     if (!sequence.length) return
     const current = livePosition ?? (direction > 0 ? -1 : sequence.length)
     const position = Math.max(0, Math.min(sequence.length - 1, current + direction))
@@ -821,6 +1238,19 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
     else if (livePosition === target) setLivePosition(position)
   }
 
+  function moveSequenceToPosition(source: number, target: number) {
+    if (source === target || source < 0 || target < 0 || source >= sequence.length || target >= sequence.length) return
+    setSequence((items) => {
+      const reordered = [...items]
+      const [item] = reordered.splice(source, 1)
+      reordered.splice(target, 0, item)
+      return reordered
+    })
+    const remap = (position: number | null) => position === null ? null : position === source ? target : source < target && position > source && position <= target ? position - 1 : source > target && position >= target && position < source ? position + 1 : position
+    setPreviewPosition((position) => remap(position))
+    setLivePosition((position) => remap(position))
+  }
+
   function duplicateSequenceItem(position: number) {
     const original = sequence[position]
     if (!original) return
@@ -836,57 +1266,90 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
     setLivePosition(null)
   }
 
+  function clearMediaFromSequence() {
+    const removed = new Set(sequence.map((item, index) => item.kind === 'image' || item.kind === 'video' ? index : -1).filter((index) => index >= 0))
+    if (!removed.size) return
+    setSequence((items) => items.filter((item) => item.kind !== 'image' && item.kind !== 'video'))
+    if (previewPosition !== null) {
+      if (removed.has(previewPosition)) setPreviewPosition(null)
+      else setPreviewPosition(previewPosition - [...removed].filter((index) => index < previewPosition).length)
+    }
+    if (livePosition !== null) {
+      if (removed.has(livePosition)) setLivePosition(null)
+      else setLivePosition(livePosition - [...removed].filter((index) => index < livePosition).length)
+    }
+    setPersistenceMessage(`Removed ${removed.size} image/video ${removed.size === 1 ? 'slide' : 'slides'} from this show. Media files remain in the library.`)
+  }
+
+  const referenceQuery = feedSearchQuery.trim().toLocaleLowerCase()
+  const bookSuggestions = activeFeed === 'bible' && bibleSearchMode === 'reference' && bookSuggestionsVisible && referenceQuery
+    ? bibleBookNames.filter((name) => name.toLocaleLowerCase().startsWith(referenceQuery)).slice(0, 10)
+    : []
+  const selectedDisplayInfo = displays.find((display) => display.id === selectedDisplay)
+  const displayStatus = displayError || (!displays.length
+    ? 'Your system reports no active display. Enable the TV as an extended display in Display settings; BibleShow checks again automatically.'
+    : displays.length === 1
+      ? 'Only the primary screen is detected. Enable the TV as an extended screen in Display settings.'
+      : selectedDisplayInfo?.isPrimary
+        ? 'Primary screen selected. The secondary screen is available in this list.'
+        : 'Secondary screen selected automatically. Live output opens there, and new screens are detected while BibleShow is open.')
+
   return (
     <section className="presentation-workspace">
       <div className="presentation-toolbar" role="toolbar" aria-label="Presentation toolbar">
         <button className="toolbar-exit" onClick={leavePresentation} aria-label="Leave presentation" title="Leave presentation">←</button>
         <span className="toolbar-brand">BibleShow</span>
-        {['Profile', 'Edit', 'View', 'Settings', 'Connections', 'Plugins'].map((item) => <button key={item} className={toolbarPanel === item ? 'active' : ''} onClick={() => setToolbarPanel((open) => open === item ? null : item)}>{item}</button>)}
+        {['File', 'Profile', 'Edit', 'View', 'Settings', 'Connections', 'Plugins'].map((item) => <button key={item} className={toolbarPanel === item ? 'active' : ''} onClick={() => setToolbarPanel((open) => open === item ? null : item)}>{item}</button>)}
+        {persistenceMessage && <span className="toolbar-status-message" role="status" title={persistenceMessage}>{persistenceMessage}</span>}
         <span className="toolbar-spacer" />
         <span className="translation-badge">{presentationId === null ? 'UNSAVED SHOW' : 'SAVED PROJECT'}</span>
       </div>
-      {toolbarPanel && <div className="toolbar-placeholder" role="status"><strong>{toolbarPanel}</strong> options will be shaped with you as this area is implemented.</div>}
+      {toolbarPanel === 'File' ? <div className="toolbar-file-panel" role="menu" aria-label="File menu">
+        <section className="toolbar-file-projects"><header><strong>Current project</strong><small>{sequence.length} items · {presentationId === null ? 'Unsaved show' : 'Saved project'}</small></header><div className="project-controls">
+          <div className="project-actions"><button role="menuitem" onClick={() => { void startNewPresentation(); setToolbarPanel(null) }} disabled={persistenceBusy}>New show</button><button className="save-presentation-button" role="menuitem" onClick={() => void saveCurrentPresentation()} disabled={persistenceBusy}>{persistenceBusy ? 'Working…' : presentationId === null ? 'Save as project' : 'Save changes'}</button></div>
+          <label>Show name<input value={presentationTitle} maxLength={160} onChange={(event) => setPresentationTitle(event.target.value)} /></label>
+          <label>Open saved project<select value={presentationId ?? ''} onChange={(event) => { const id = Number(event.target.value); if (event.target.value) { void openPresentation(id); setToolbarPanel(null) } }} disabled={!presentations.length || persistenceBusy}><option value="">{presentations.length ? 'Choose a project' : 'No saved projects yet'}</option>{presentations.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.slideCount} items</option>)}</select></label>
+          <div className="project-actions"><label className="project-file-button">Import<input type="file" accept=".json,application/json" disabled={persistenceBusy} onChange={(event) => { void importProject(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} /></label><button role="menuitem" onClick={exportProject} disabled={!sequence.length}>Export</button>{presentationId !== null && <button role="menuitem" onClick={() => void removePresentation()} disabled={persistenceBusy}>Delete project</button>}</div>
+        </div></section>
+        <section className="toolbar-file-lyrics"><strong>Lyrics library</strong><button role="menuitem" onClick={() => openSongEditor(null)}>Add new song</button><button role="menuitem" onClick={() => { setActiveFeed('lyrics'); setLyricsImportRequest((request) => request + 1); setToolbarPanel(null) }}>Import songs or hymns</button><button role="menuitem" onClick={() => openSongEditor(selectedSongIds.length === 1 ? selectedSongIds[0] : null)} disabled={selectedSongIds.length !== 1}>Edit selected song</button><button role="menuitem" onClick={() => deleteLibrarySongs(selectedSongIds)} disabled={!selectedSongIds.length}>Delete selected ({selectedSongIds.length})</button><button role="menuitem" onClick={() => openSongExport(selectedSongIds)} disabled={!selectedSongIds.length}>Export selected</button></section>
+      </div> : toolbarPanel && <div className="toolbar-placeholder" role="status"><strong>{toolbarPanel}</strong> options will be shaped with you as this area is implemented.</div>}
       {pendingProjectAction && <div className="project-change-backdrop"><section className="project-change-dialog" role="dialog" aria-modal="true" aria-labelledby="project-change-title"><h2 id="project-change-title">Unsaved show changes</h2><p>{pendingProjectAction.kind === 'leave' ? 'Save your changes before leaving the presentation workspace?' : pendingProjectAction.kind === 'new' ? 'Save your changes before starting a new show?' : 'Save your changes before opening another project?'}</p><div><button className="save-presentation-button" onClick={() => void resolvePendingProjectAction('save')} disabled={persistenceBusy}>Save and continue</button><button onClick={() => void resolvePendingProjectAction('discard')} disabled={persistenceBusy}>Discard changes</button><button onClick={() => void resolvePendingProjectAction('stay')} disabled={persistenceBusy}>Stay here</button></div></section></div>}
       {editingPosition !== null && <div className="project-change-backdrop"><form className="project-change-dialog slide-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="slide-edit-title" onSubmit={(event) => { event.preventDefault(); saveSlideEdit() }}><h2 id="slide-edit-title">Edit show slide</h2><label>Title<input autoFocus maxLength={160} value={slideDraft.title} onChange={(event) => setSlideDraft((draft) => ({ ...draft, title: event.target.value }))} /></label><label>Subtitle<input maxLength={160} value={slideDraft.subtitle} onChange={(event) => setSlideDraft((draft) => ({ ...draft, subtitle: event.target.value }))} /></label><label>Reference or attribution<input maxLength={160} value={slideDraft.reference} onChange={(event) => setSlideDraft((draft) => ({ ...draft, reference: event.target.value }))} /></label>{['scripture', 'lyrics'].includes(sequence[editingPosition]?.kind ?? '') && <label>Displayed text<textarea maxLength={4000} rows={7} value={slideDraft.body} onChange={(event) => setSlideDraft((draft) => ({ ...draft, body: event.target.value }))} /><span>Text changes apply only to this show slide. The imported Bible or song remains unchanged.</span><button type="button" onClick={() => setSlideDraft((draft) => ({ ...draft, body: sequence[editingPosition]?.body ?? '' }))}>Reset text to source</button></label>}<div><button type="button" onClick={() => setEditingPosition(null)}>Cancel</button><button type="submit" className="save-presentation-button" disabled={!slideDraft.title.trim()}>Apply to show</button></div></form></div>}
 
       <div className="operator-layout" style={{ '--left-pane-width': `${paneSizes.left}px`, '--right-pane-width': `${paneSizes.right}px`, '--center-top-height': `${paneSizes.centerTop}px` } as CSSProperties}>
-        <aside className="operator-projects operator-pane">
-          <header className="pane-heading"><div><strong>Projects &amp; Show</strong><small>{sequence.length} items in current show</small></div><button onClick={() => startNewPresentation()} disabled={persistenceBusy}>New</button></header>
-          <div className="project-controls">
-            <label>Show name<input value={presentationTitle} maxLength={160} onChange={(event) => setPresentationTitle(event.target.value)} /></label>
-            <label>Open saved project<select value={presentationId ?? ''} onChange={(event) => { if (event.target.value) void openPresentation(Number(event.target.value)) }} disabled={!presentations.length || persistenceBusy}><option value="">{presentations.length ? 'Choose a project' : 'No saved projects yet'}</option>{presentations.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.slideCount} items</option>)}</select></label>
-            <div className="project-actions"><button className="save-presentation-button" onClick={() => void saveCurrentPresentation()} disabled={persistenceBusy}>{persistenceBusy ? 'Working…' : presentationId === null ? 'Save as project' : 'Save changes'}</button><label className="project-file-button">Import<input type="file" accept=".json,application/json" disabled={persistenceBusy} onChange={(event) => { void importProject(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} /></label><button onClick={exportProject} disabled={!sequence.length}>Export</button>{presentationId !== null && <button onClick={() => void removePresentation()} disabled={persistenceBusy}>Delete</button>}</div>
-            {persistenceMessage && <span className="presentation-save-message" role="status">{persistenceMessage}</span>}
-          </div>
-          <div className="show-list-heading"><strong>Current show</strong><button onClick={clearSequence} disabled={!sequence.length}>Clear</button></div>
-          <p className="sequence-help">Drag content here or use + to add it. Reorder with the arrows.</p>
+        <aside className="operator-show-items operator-pane">
+          <header className="pane-heading"><div><strong>Current show</strong></div><button onClick={clearSequence} disabled={!sequence.length}>Clear show</button></header>
+          <p className="sequence-help">Drag content here to add it. Drag show items to reorder.</p>
           <div className="sequence-list" onDragOver={(event) => event.preventDefault()} onDrop={handleSourceDrop}>
-            {sequence.map((item, index) => <div className={`sequence-item${previewPosition === index ? ' is-preview' : ''}${livePosition === index ? ' is-live' : ''}`} key={item.queueId}>
+            {sequence.map((item, index) => <div className={`sequence-item${previewPosition === index ? ' is-preview' : ''}${livePosition === index ? ' is-live' : ''}`} key={item.queueId} draggable onDragStart={(event) => { event.dataTransfer.setData('text/bibleshow-queue-id', item.queueId); event.dataTransfer.effectAllowed = 'move' }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { const bounds = event.currentTarget.getBoundingClientRect(); handleSourceDrop(event, index + Number(event.clientY > bounds.top + bounds.height / 2)) }}>
               <button className="sequence-select" onClick={() => selectPreviewPosition(index)} onDoubleClick={() => sendLive(item, index)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); sendLive(item, index) } }} aria-label={`Preview ${item.title}; press Enter or double-click to send Live`}><span className="sequence-number">{String(index + 1).padStart(2, '0')}</span><span className="sequence-thumb">{displayBody(item).slice(0, 38)}</span><span className="sequence-item-title">{item.title}</span><small>{item.subtitle}</small></button>
               <button className="sequence-remove" onClick={() => removeFromSequence(index)} aria-label={`Remove ${item.title} from sequence`}>×</button>
               <div className="sequence-tools"><button onClick={() => beginSlideEdit(index)}>Edit</button><button onClick={() => moveSequenceItem(index, -1)} disabled={index === 0} aria-label={`Move ${item.title} up`}>↑</button><button onClick={() => moveSequenceItem(index, 1)} disabled={index === sequence.length - 1} aria-label={`Move ${item.title} down`}>↓</button><button onClick={() => duplicateSequenceItem(index)}>Duplicate</button></div>
               {livePosition === index && <span className="sequence-live-label">LIVE</span>}{previewPosition === index && <span className="sequence-preview-label">PREVIEW</span>}
             </div>)}
-            {sequence.length === 0 && <div className="sequence-empty"><Icon name="plus" size={18} /><strong>Drop items for this show</strong><p>Add Scripture or lyric pages from the content feed below.</p></div>}
+            {sequence.length === 0 && <div className="sequence-empty"><Icon name="plus" size={18} /><strong>Drop items for this show</strong><p>Drag content here from the feeds below or add it with the + buttons.</p></div>}
           </div>
-          <footer className="sequence-footer"><span>{presentationId === null ? 'UNSAVED SHOW' : 'LOCAL PROJECT'}</span><small>{presentationId === null ? 'Save this show as a project before closing.' : 'Changes stay on this device.'}</small></footer>
         </aside>
 
-        <div className="pane-resizer vertical-resizer" role="separator" aria-label="Resize project panel" aria-orientation="vertical" onPointerDown={(event) => startPaneResize(event, 'left')} />
+        <div className="pane-resizer vertical-resizer" role="separator" aria-label="Resize current show panel" aria-orientation="vertical" onPointerDown={(event) => startPaneResize(event, 'left')} />
 
         <main className="operator-center">
           <section className="operator-display-area">
             <div className="operator-monitors">
-              <MonitorPanel type="preview" slide={previewSlide} theme={presentationTheme} cameraStream={cameraStream} playback={previewPlayback} delayLiveVideo={delayLiveVideo} onDelayLiveVideoChange={setDelayLiveVideo} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('preview', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('preview', sourceId, currentTime, duration)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} canNavigate={sequence.length > 0} onAction={() => previewSlide && sendLive(previewSlide, previewPosition)} />
-              <MonitorPanel type="live" slide={liveDisplayOpen ? liveSlide : null} nextSlide={liveDisplayOpen ? nextSlide : null} theme={presentationTheme} overlays={liveDisplayOpen ? overlays : []} countdown={liveDisplayOpen ? countdown : undefined} cameraStream={cameraStream} playback={livePlayback} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('live', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('live', sourceId, currentTime, duration)} alert={liveDisplayOpen ? activeAlert : null} onPrevious={() => moveLive(-1)} onNext={() => moveLive(1)} canNavigate={sequence.length > 0} onAction={() => moveLive(1)} emptyLabel={liveDisplayOpen ? 'Nothing live yet' : 'Live display is closed'} />
+              <MonitorPanel type="preview" slide={previewSlide} theme={presentationTheme} cameraStream={cameraStream} playback={previewPlayback} delayLiveVideo={delayLiveVideo} onDelayLiveVideoChange={setDelayLiveVideo} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('preview', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('preview', sourceId, currentTime, duration)} onPrevious={() => movePreview(-1)} onNext={() => movePreview(1)} canNavigate={sequence.length > 0 || (previewSlide?.kind === 'pdf' && previewPosition === null && (previewSlide.pageCount ?? 0) > 1)} onAction={() => previewSlide && sendLive(previewSlide, previewPosition)} />
+              <MonitorPanel type="live" slide={liveDisplayOpen ? liveSlide : null} nextSlide={liveDisplayOpen ? nextSlide : null} theme={presentationTheme} overlays={liveDisplayOpen ? overlays : []} countdown={liveDisplayOpen ? countdown : undefined} cameraStream={cameraStream} playback={livePlayback} onPlaybackCommand={(sourceId, patch) => changeVideoPlayback('live', sourceId, patch)} onPlaybackTime={(sourceId, currentTime, duration) => handleVideoTime('live', sourceId, currentTime, duration)} alert={liveDisplayOpen ? activeAlert : null} onPrevious={() => moveLive(-1)} onNext={() => moveLive(1)} canNavigate={sequence.length > 0 || (liveSlide?.kind === 'pdf' && livePosition === null && (liveSlide.pageCount ?? 1) > 1)} onAction={() => moveLive(1)} emptyLabel={liveDisplayOpen ? 'Nothing live yet' : 'Live display is closed'} />
             </div>
-            <form className="operator-status bible-search-bar" onSubmit={(event) => { event.preventDefault(); if (bibleSearchQuery.trim()) { setActiveFeed('bible'); setBibleSearchRequest({ mode: bibleSearchMode, query: bibleSearchQuery.trim(), id: Date.now() }) } }}>
+            <div className="operator-status feed-search-bar" role="search" aria-label={`Search ${presentationFeedLabels[activeFeed]}`}>
               <Icon name="search" size={17} />
-              <select aria-label="Bible search type" value={bibleSearchMode} onChange={(event) => setBibleSearchMode(event.target.value as 'reference' | 'keyword')}><option value="reference">Reference</option><option value="keyword">Keyword</option></select>
-              <input aria-label={bibleSearchMode === 'reference' ? 'Search Bible reference' : 'Search Bible keywords'} value={bibleSearchQuery} onChange={(event) => setBibleSearchQuery(event.target.value)} placeholder={bibleSearchMode === 'reference' ? 'Search passage (e.g. John 3:16-18)' : 'Search words in the Bible'} />
-              <button type="submit" disabled={!bibleSearchQuery.trim()}>Search</button>
-              <span className="operator-offline">KJV</span>
-            </form>
+              {activeFeed === 'bible' && <select aria-label="Bible search type" value={bibleSearchMode} onChange={(event) => { setBibleSearchMode(event.target.value as 'reference' | 'keyword'); setBookSuggestionsVisible(false) }}><option value="reference">Reference</option><option value="keyword">Keyword</option></select>}
+              <div className="feed-search-input-wrap">
+                <input type="search" role={activeFeed === 'bible' && bibleSearchMode === 'reference' ? 'combobox' : undefined} aria-autocomplete={activeFeed === 'bible' && bibleSearchMode === 'reference' ? 'list' : undefined} aria-expanded={Boolean(bookSuggestions.length)} aria-controls={bookSuggestions.length ? 'bible-book-suggestions' : undefined} aria-activedescendant={bookSuggestions[activeBookSuggestion] ? `bible-book-suggestion-${activeBookSuggestion}` : undefined} aria-label={`Search ${presentationFeedLabels[activeFeed]}`} value={feedSearchQuery} onFocus={() => setBookSuggestionsVisible(true)} onBlur={() => setBookSuggestionsVisible(false)} onChange={(event) => { setFeedSearchQuery(event.target.value); setActiveBookSuggestion(-1); setBookSuggestionsVisible(true) }} onKeyDown={(event) => { if (bookSuggestions.length && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); setActiveBookSuggestion((index) => event.key === 'ArrowDown' ? Math.min(index + 1, bookSuggestions.length - 1) : Math.max(index - 1, 0)); return } if (event.key === 'Escape' && bookSuggestions.length) { event.preventDefault(); setBookSuggestionsVisible(false); return } if (event.key === 'Enter') { event.preventDefault(); if (bookSuggestions[activeBookSuggestion]) chooseBookSuggestion(bookSuggestions[activeBookSuggestion]); else submitFeedSearch() } }} placeholder={activeFeed === 'bible' ? bibleSearchMode === 'reference' ? 'Search passage (e.g. John 3:16-18)' : 'Search words in the Bible' : `Search ${presentationFeedLabels[activeFeed]}`} />
+                {bookSuggestions.length > 0 && <div id="bible-book-suggestions" className="bible-book-suggestions" role="listbox" aria-label="Bible books">{bookSuggestions.map((name, index) => <button id={`bible-book-suggestion-${index}`} key={name} role="option" aria-selected={index === activeBookSuggestion} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => chooseBookSuggestion(name)}>{name}</button>)}</div>}
+              </div>
+              <button type="button" onClick={submitFeedSearch} disabled={!feedSearchQuery.trim()}>Search</button>
+              {activeFeed === 'bible' && <span className="operator-offline">Bible</span>}
+              {(activeFeed === 'bible' || activeFeed === 'lyrics') && <ResourceImportDialog key={activeFeed === 'lyrics' ? `lyrics-${lyricsImportRequest}` : 'bible-import'} mode={activeFeed} onImported={refreshImportedResources} onDismiss={activeFeed === 'lyrics' ? () => setLyricsImportRequest(0) : undefined} openRequest={activeFeed === 'lyrics' ? lyricsImportRequest : 0} />}
+            </div>
           </section>
 
           <div className="pane-resizer horizontal-resizer" role="separator" aria-label="Resize preview and content areas" aria-orientation="horizontal" onPointerDown={(event) => startPaneResize(event, 'centerTop')} />
@@ -894,23 +1357,17 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
           <section className="content-feed operator-pane">
             <nav className="feed-tabs" aria-label="Content feeds">{([
               ['bible', 'Bible'], ['lyrics', 'Lyrics'], ['media', 'Videos / Images'], ['presentations', 'Presentations'], ['live', 'Live Feed'], ['themes', 'Themes'], ['functions', 'Functions'], ['overlays', 'Overlays'], ['url', 'URL Media'],
-            ] as const).map(([key, label]) => <button key={key} className={activeFeed === key ? 'selected' : ''} onClick={() => setActiveFeed(key)}>{label}</button>)}</nav>
+            ] as const).map(([key, label]) => <button key={key} className={activeFeed === key ? 'selected' : ''} onClick={() => { setActiveFeed(key); setFeedSearchQuery(''); if (key !== 'bible') setBibleSearchRequest(null); if (key !== 'lyrics') { setLyricsPresentRequest(null); setLyricsImportRequest(0) } }}>{label}</button>)}</nav>
             <div className="feed-content">
-              {activeFeed === 'bible' && <>
-                <ResourceImportPanel mode="bible" onImported={refreshImportedResources} />
-                <BibleSourcePicker key={resourceRevision} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} previewSourceId={previewSlide?.sourceId ?? null} searchRequest={bibleSearchRequest} />
-              </>}
-              {activeFeed === 'lyrics' && <>
-                <ResourceImportPanel mode="lyrics" onImported={refreshImportedResources} />
-                <SongSourcePicker key={resourceRevision} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />
-              </>}
-              {activeFeed === 'media' && <MediaSourcePicker onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
-              {activeFeed === 'presentations' && <SavedPresentationsFeed presentations={presentations} onRefresh={refreshPresentations} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} />}
-              {activeFeed === 'live' && <NetworkLiveFeed onConnect={connectNetworkFeed} onConnectCamera={connectCamera} onConnectUrl={connectStreamUrl} onStop={stopNetworkFeed} slide={liveFeedSlide} cameraStream={cameraStream} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} />}
-              {activeFeed === 'themes' && <ThemesFeed theme={presentationTheme} onSelect={setPresentationTheme} />}
-              {activeFeed === 'functions' && <FunctionsFeed countdown={countdown} onChange={setCountdown} />}
-              {activeFeed === 'overlays' && <OverlaysFeed overlays={overlays} onChange={setOverlays} />}
-              {activeFeed === 'url' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>This content feed is planned and remains deferred.</p></div>}
+              {activeFeed === 'bible' && <BibleSourcePicker key={resourceRevision} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onPresentSlides={presentSlides} onAdd={addToSequence} onAddMany={addManyToSequence} previewSourceId={previewSlide?.sourceId ?? null} searchRequest={bibleSearchRequest} searchQuery={feedSearchQuery} searchMode={bibleSearchMode} onBookNamesChange={updateBibleBookNames} />}
+              {activeFeed === 'lyrics' && <SongSourcePicker key={resourceRevision} searchQuery={feedSearchQuery} presentRequest={lyricsPresentRequest} selectedSongIds={selectedSongIds} onSelectedSongIdsChange={setSelectedSongIds} onEditSong={openSongEditor} onAddSong={() => openSongEditor(null)} onDeleteSongs={deleteLibrarySongs} onExportSongs={openSongExport} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onPresentSlides={presentSlides} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
+              {activeFeed === 'media' && <MediaSourcePicker searchQuery={feedSearchQuery} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} onAdd={addToSequence} previewSourceId={previewSlide?.sourceId ?? null} />}
+              {activeFeed === 'presentations' && <PresentationLibraryFeed presentations={presentations} searchQuery={feedSearchQuery} showSlideCount={sequence.length} onRefreshShows={refreshPresentations} onPreview={preview} onSendLive={(slide) => void sendLive(slide, null)} onAdd={addToSequence} onAddMany={addManyToSequence} onOpenExternal={openExternalPresentationFile} onDeleteFile={deletePresentationFile} powerpointSession={powerpointSession} onStartPowerpoint={startPowerPointSession} onStopPowerpoint={stopPowerPointSession} />}
+              {activeFeed === 'live' && <NetworkLiveFeed searchQuery={feedSearchQuery} onConnect={connectNetworkFeed} onConnectCamera={connectCamera} onConnectUrl={connectStreamUrl} onStop={stopNetworkFeed} slide={liveFeedSlide} cameraStream={cameraStream} onPreview={preview} onSendLive={(slide) => sendLive(slide, null)} />}
+              {activeFeed === 'themes' && <ThemesFeed searchQuery={feedSearchQuery} theme={presentationTheme} onSelect={setPresentationTheme} liveFeed={liveFeedSlide} resourceRevision={resourceRevision} />}
+              {activeFeed === 'functions' && <FunctionsFeed searchQuery={feedSearchQuery} countdown={countdown} onChange={setCountdown} />}
+              {activeFeed === 'overlays' && <OverlaysFeed searchQuery={feedSearchQuery} overlays={overlays} onChange={setOverlays} />}
+              {activeFeed === 'url' && <div className="feed-coming-soon"><strong>{presentationFeedLabels[activeFeed]}</strong><p>{feedSearchQuery ? `No URL media matches “${feedSearchQuery}”.` : 'This content feed is planned and remains deferred.'}</p></div>}
             </div>
           </section>
         </main>
@@ -919,24 +1376,293 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
 
         <aside className="operator-display-controls operator-pane">
           <header className="pane-heading"><div><strong>Display controls</strong><small>{liveDisplayOpen ? 'Local Live monitor ready' : 'Local Live monitor closed'}</small></div><span className={liveDisplayOpen ? 'display-ready-dot' : 'display-closed-dot'} /></header>
-          <section className="display-control-group"><h3>Clear items</h3><button onClick={() => stagePreview(null, null)} disabled={!previewSlide}>Clear Preview</button><button onClick={() => { setLiveSlide(null); setLivePosition(null); setLivePlayback(null) }} disabled={!liveSlide}>Clear Live content</button><button onClick={() => setOverlays((items) => items.map((item) => item.locked ? item : { ...item, visible: false }))} disabled={!overlays.some((item) => item.visible && !item.locked)}>Clear unlocked overlays</button><button onClick={() => setActiveAlert(null)} disabled={!activeAlert}>Clear message alert</button><button onClick={() => setLiveDisplayOpen(false)} disabled={!liveDisplayOpen}>Hide operator Live monitor</button><button onClick={() => setLiveDisplayOpen(true)} disabled={liveDisplayOpen}>Show operator Live monitor</button></section>
-          <section className="display-control-group"><h3>Audience output</h3><label>Display<select value={selectedDisplay} onChange={(event) => setSelectedDisplay(event.target.value)} disabled={audienceWindowOpen || !displays.length}><option value="">Select a display</option>{displays.map((display) => <option key={display.index} value={display.index}>{display.name} · {display.width} × {display.height}</option>)}</select></label><button className="save-presentation-button" onClick={() => void toggleAudienceWindow(true)} disabled={audienceWindowOpen || selectedDisplay === ''}>Open fullscreen output</button><button className="display-close-button" onClick={() => void toggleAudienceWindow(false)} disabled={!audienceWindowOpen}>Close audience output</button><small>{audienceWindowOpen ? 'Live slides are mirrored to this display.' : 'Choose the screen for the audience display.'}</small></section>
-          <section className="display-control-group"><h3>Message alert</h3><label>Message<textarea value={alertDraft} onChange={(event) => setAlertDraft(event.target.value)} placeholder="Type a message for the audience" rows={3} /></label><label>Display style<select value={alertMode} onChange={(event) => setAlertMode(event.target.value as 'static' | 'scrolling')}><option value="static">Static</option><option value="scrolling">Scrolling</option></select></label><div className="alert-actions"><button className="save-presentation-button" onClick={() => alertDraft.trim() && setActiveAlert({ text: alertDraft.trim(), mode: alertMode })} disabled={!alertDraft.trim() || !liveDisplayOpen}>Show alert</button><button onClick={() => setActiveAlert(null)} disabled={!activeAlert}>Clear alert</button></div></section>
-          {activeAlert && <p className="alert-live-status" role="status">{activeAlert.mode === 'scrolling' ? 'Scrolling' : 'Static'} alert is on Live.</p>}
+          <section className="display-control-group"><h3>Clear items</h3><button onClick={() => stagePreview(null, null)} disabled={!previewSlide}>Clear Preview</button><button onClick={() => { setLiveSlide(null); setLivePosition(null); setLivePlayback(null) }} disabled={!liveSlide}>Clear Live content</button><button onClick={clearMediaFromSequence} disabled={!sequence.some((item) => item.kind === 'image' || item.kind === 'video')}>Clear media from show</button><button onClick={() => setOverlays((items) => items.map((item) => item.locked ? item : { ...item, visible: false }))} disabled={!overlays.some((item) => item.visible && !item.locked)}>Clear unlocked overlays</button><button onClick={() => setActiveAlert(null)} disabled={!activeAlert}>Clear message alert</button><button onClick={() => setLiveDisplayOpen(false)} disabled={!liveDisplayOpen}>Hide operator Live monitor</button><button onClick={() => setLiveDisplayOpen(true)} disabled={liveDisplayOpen}>Show operator Live monitor</button></section>
+          <section className="display-control-group"><h3>Audience output</h3><label>Display<select value={selectedDisplay} onChange={(event) => { userSelectedDisplay.current = true; setSelectedDisplay(event.target.value) }} disabled={!displays.length}><option value="">Select a display</option>{displays.map((display) => <option key={display.id} value={display.id}>{display.name} · {display.isPrimary ? 'Primary' : 'Secondary'} · {display.width} × {display.height}</option>)}</select></label><div className="display-actions"><button className="save-presentation-button" onClick={() => void toggleAudienceWindow(true)} disabled={audienceWindowOpen || selectedDisplay === ''}>Open fullscreen output</button><button type="button" onClick={() => void refreshDisplays()}>Refresh displays</button></div><button className="display-close-button" onClick={() => void toggleAudienceWindow(false)} disabled={!audienceWindowOpen}>Close audience output</button><small role="status">{audienceWindowOpen ? `Live is projecting to ${selectedDisplayInfo?.name ?? 'the selected screen'}. ${displayStatus}` : displayStatus}</small></section>
+          <section className="display-control-group message-alert-controls"><h3>Message alert</h3><label>Title<input value={alertTitleDraft} maxLength={80} onChange={(event) => setAlertTitleDraft(event.target.value)} placeholder="Name this message" /></label><label>Message<textarea value={alertDraft} onChange={(event) => setAlertDraft(event.target.value)} placeholder="Type a message for the audience" rows={3} /></label><div className="alert-setting-row"><label>Display style<select value={alertMode} onChange={(event) => setAlertMode(event.target.value as 'static' | 'scrolling')}><option value="static">Static</option><option value="scrolling">Scrolling</option></select></label><label>Position<select value={alertPosition} onChange={(event) => setAlertPosition(event.target.value as MessageAlert['position'])}><option value="bottom">Bottom</option><option value="middle">Middle</option><option value="top">Top</option></select></label></div><label>Text size <output>{alertFontSize.toFixed(1)}vw</output><input type="range" min="1.8" max="6" step="0.1" value={alertFontSize} onChange={(event) => setAlertFontSize(Number(event.target.value))} /></label><div className="alert-color-row"><label>Text color<input type="color" value={alertTextColor} onChange={(event) => setAlertTextColor(event.target.value)} /></label><label>Background<input type="color" value={alertBackgroundColor} onChange={(event) => setAlertBackgroundColor(event.target.value)} /></label></div>{alertMode === 'static' ? <label>Show for (seconds)<input type="number" min="1" max="600" value={alertStaticDuration} onChange={(event) => setAlertStaticDuration(Math.max(1, Math.min(600, Number(event.target.value) || 1)))} /></label> : <><label>Repeat count<input type="number" min="1" max="100" value={alertRepeatCount} disabled={alertRepeatForever} onChange={(event) => setAlertRepeatCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label><label className="alert-repeat-toggle"><input type="checkbox" checked={alertRepeatForever} onChange={(event) => setAlertRepeatForever(event.target.checked)} />Continue until removed</label></>}<div className="alert-actions"><button className="save-presentation-button" onClick={showAlert} disabled={!alertDraft.trim() || !liveDisplayOpen}>Show alert</button><button onClick={saveAlertToLibrary} disabled={!alertTitleDraft.trim() || !alertDraft.trim()}>Save message</button><button onClick={() => setActiveAlert(null)} disabled={!activeAlert}>Clear</button></div><label>Search saved messages<input type="search" value={alertLibrarySearch} onChange={(event) => setAlertLibrarySearch(event.target.value)} placeholder="Search titles and messages" /></label><div className="saved-alert-list">{savedAlerts.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(alertLibrarySearch.trim().toLowerCase())).map((item) => <div key={item.id}><button className="saved-alert-load" onClick={() => loadAlertFromLibrary(item)}><strong>{item.title}</strong><small>{item.content}</small></button><button className="saved-alert-delete" onClick={() => setSavedAlerts((items) => items.filter((saved) => saved.id !== item.id))} aria-label={`Delete saved alert ${item.title}`}>×</button></div>)}{savedAlerts.length === 0 && <small className="saved-alert-empty">Save a titled message to reuse it here.</small>}{savedAlerts.length > 0 && !savedAlerts.some((item) => `${item.title} ${item.content}`.toLowerCase().includes(alertLibrarySearch.trim().toLowerCase())) && <small className="saved-alert-empty">No saved messages match.</small>}</div></section>
+          {activeAlert && <p className="alert-live-status" role="status">{activeAlert.mode === 'scrolling' ? activeAlert.repeatCount === null ? 'Scrolling until removed' : `Scrolling ${activeAlert.repeatCount} time${activeAlert.repeatCount === 1 ? '' : 's'}` : `Static for ${activeAlert.staticDurationSeconds}s`} · {activeAlert.position}</p>}
         </aside>
       </div>
+      {songEditorRequest && <SongEditorDialog key={songEditorRequest.request} songId={songEditorRequest.songId} onClose={() => setSongEditorRequest(null)} onSaved={() => { setSongEditorRequest(null); setResourceRevision((revision) => revision + 1); onRefreshLibrary(); setPersistenceMessage('Song saved permanently in the lyrics library.') }} />}
+      {songExportRequest && <SongExportDialog key={songExportRequest.request} songIds={songExportRequest.songIds} onClose={() => setSongExportRequest(null)} />}
     </section>
   )
 }
 
-function SavedPresentationsFeed({ presentations, onRefresh, onPreview, onSendLive, onAdd, onAddMany }: {
+function PresentationLibraryFeed({ presentations, searchQuery, showSlideCount, onRefreshShows, onPreview, onSendLive, onAdd, onAddMany, onOpenExternal, onDeleteFile, powerpointSession, onStartPowerpoint, onStopPowerpoint }: {
   presentations: PresentationSummary[]
+  searchQuery: string
+  showSlideCount: number
+  onRefreshShows: () => Promise<void>
+  onPreview: (slide: PresentationSlide) => void
+  onSendLive: (slide: PresentationSlide) => void
+  onAdd: (slide: PresentationSlide) => void
+  onAddMany: (slides: PresentationSlide[]) => void
+  onOpenExternal: (fileId: string) => void
+  onDeleteFile: (fileId: string) => Promise<void>
+  powerpointSession: PowerPointSession | null
+  onStartPowerpoint: (fileId: string) => Promise<PowerPointSession | null>
+  onStopPowerpoint: () => Promise<void>
+}) {
+  const [view, setView] = useState<'files' | 'shows'>('files')
+  return <div className="presentation-library-feed source-browser">
+    <nav className="presentation-library-tabs" aria-label="Presentation library">{([['files', 'Presentation files'], ['shows', 'Saved shows']] as const).map(([key, label]) => <button type="button" key={key} className={view === key ? 'selected' : ''} onClick={() => setView(key)}>{label}</button>)}</nav>
+    {view === 'files' ? <PresentationFilesFeed searchQuery={searchQuery} showSlideCount={showSlideCount} onPreview={onPreview} onSendLive={onSendLive} onAdd={onAdd} onAddMany={onAddMany} onOpenExternal={onOpenExternal} onDeleteFile={onDeleteFile} powerpointSession={powerpointSession} onStartPowerpoint={onStartPowerpoint} onStopPowerpoint={onStopPowerpoint} /> : <SavedPresentationsFeed presentations={presentations} searchQuery={searchQuery} onRefresh={onRefreshShows} onPreview={onPreview} onSendLive={onSendLive} onAdd={onAdd} onAddMany={onAddMany} />}
+  </div>
+}
+
+function PresentationFilesFeed({ searchQuery, showSlideCount, onPreview, onSendLive, onAdd, onAddMany, onOpenExternal, onDeleteFile, powerpointSession, onStartPowerpoint, onStopPowerpoint }: {
+  searchQuery: string
+  showSlideCount: number
+  onPreview: (slide: PresentationSlide) => void
+  onSendLive: (slide: PresentationSlide) => void
+  onAdd: (slide: PresentationSlide) => void
+  onAddMany: (slides: PresentationSlide[]) => void
+  onOpenExternal: (fileId: string) => void
+  onDeleteFile: (fileId: string) => Promise<void>
+  powerpointSession: PowerPointSession | null
+  onStartPowerpoint: (fileId: string) => Promise<PowerPointSession | null>
+  onStopPowerpoint: () => Promise<void>
+}) {
+  const [files, setFiles] = useState<PresentationFile[]>([])
+  const [selectedFileId, setSelectedFileId] = useState('')
+  const [pageByFile, setPageByFile] = useState<Record<string, number>>({})
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [previewPaths, setPreviewPaths] = useState<Record<string, string>>({})
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const visibleFiles = files.filter((file) => `${file.filename} ${file.fileType}`.toLowerCase().includes(normalizedSearch))
+  const selectedFile = visibleFiles.find((file) => file.id === selectedFileId) ?? visibleFiles[0] ?? null
+  const currentPage = selectedFile && ['pdf', 'ppt', 'pptx', 'pps', 'ppsx'].includes(selectedFile.fileType) && selectedFile.pageCount > 0 ? Math.min(selectedFile.pageCount, Math.max(1, pageByFile[selectedFile.id] ?? 1)) : 1
+  const previewPath = selectedFile
+    ? previewPaths[`${selectedFile.id}:${currentPage}`] ?? (powerpointSession?.fileId === selectedFile.id ? powerpointSession.slideThumbnails[currentPage - 1] ?? '' : '')
+    : ''
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    invoke<PresentationFile[]>('get_presentation_files').then((items) => {
+      if (!active) return
+      setFiles(items)
+      setSelectedFileId((current) => items.some((file) => file.id === current) ? current : items[0]?.id ?? '')
+    }).catch((error) => { if (active) setMessage(String(error)) })
+    return () => { active = false }
+  }, [])
+
+  async function refreshFiles() {
+    if (!isTauri()) return
+    try {
+      const items = await invoke<PresentationFile[]>('get_presentation_files')
+      setFiles(items)
+      setSelectedFileId((current) => items.some((file) => file.id === current) ? current : items[0]?.id ?? '')
+    } catch (error) { setMessage(String(error)) }
+  }
+
+  async function importFiles(fileList: FileList | null) {
+    if (!fileList?.length) return
+    if (!isTauri()) { setMessage('Open BibleShow in the desktop app to import presentation files.'); return }
+    setBusy(true)
+    setMessage(`Reading ${fileList.length} presentation file${fileList.length === 1 ? '' : 's'}…`)
+    let imported = 0
+    const failures: string[] = []
+    try {
+      for (const file of Array.from(fileList)) {
+        try {
+          if (!file.size || file.size > 500 * 1024 * 1024) throw new Error('Choose a non-empty file smaller than 500 MB.')
+          const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          let pageCount = 0
+          if (extension === 'pdf') {
+            const { getDocument } = await loadPdfJs()
+            const pdfTask = getDocument({ data: bytes.slice() })
+            const pdf = await pdfTask.promise
+            pageCount = pdf.numPages
+            await pdfTask.destroy()
+          }
+          const item = await invoke<PresentationFile>('import_presentation_file', bytes, { headers: { 'x-bibleshow-filename': encodeURIComponent(file.name), 'x-bibleshow-page-count': String(pageCount) } })
+          setFiles((current) => [item, ...current.filter((existing) => existing.id !== item.id)])
+          setSelectedFileId(item.id)
+          imported += 1
+          setMessage(`Imported ${imported} of ${fileList.length} file${fileList.length === 1 ? '' : 's'}…`)
+        } catch (error) { failures.push(`${file.name}: ${String(error)}`) }
+      }
+      if (imported) setMessage(`Imported ${imported} presentation file${imported === 1 ? '' : 's'}.${failures.length ? ` ${failures.join(' ')}` : ''}`)
+      else if (failures.length) setMessage(failures.join(' '))
+    } finally { setBusy(false) }
+  }
+
+  async function removeFile(file: PresentationFile) {
+    await onDeleteFile(file.id)
+    await refreshFiles()
+  }
+
+  function pdfSlide(file: PresentationFile, page: number): PresentationSlide {
+    return { sourceId: `presentation-file:${file.id}:${page}`, title: file.filename, subtitle: `Page ${page}`, body: '', reference: file.filename, kind: 'pdf', presentationFileId: file.id, documentPage: page, pageCount: file.pageCount, mediaPath: file.localPath }
+  }
+
+  function powerpointSlide(file: PresentationFile, page: number, imagePath?: string): PresentationSlide {
+    const mediaPath = imagePath ?? previewPaths[`${file.id}:${page}`] ?? (powerpointSession?.fileId === file.id ? powerpointSession.slideThumbnails[page - 1] : undefined)
+    return { sourceId: `presentation-file:${file.id}:${page}`, title: file.filename, subtitle: `Slide ${page}`, body: '', reference: file.filename, kind: 'powerpoint', presentationFileId: file.id, documentPage: page, pageCount: file.pageCount, mediaPath }
+  }
+
+  const powerpointActive = powerpointSession?.fileId === selectedFile?.id
+
+  async function startPowerPoint() {
+    if (!selectedFile || !['ppt', 'pptx', 'pps', 'ppsx'].includes(selectedFile.fileType)) return
+    setBusy(true)
+    const session = await onStartPowerpoint(selectedFile.id)
+    if (session) {
+      setFiles((items) => items.map((file) => file.id === selectedFile.id ? { ...file, pageCount: session.slideCount } : file))
+      setPageByFile((current) => ({ ...current, [selectedFile.id]: 1 }))
+      onPreview(powerpointSlide({ ...selectedFile, pageCount: session.slideCount }, 1, session.slideThumbnails[0]))
+      setMessage(`${session.slideCount} slides are ready. Select a slide below to preview it.`)
+    }
+    setBusy(false)
+  }
+
+  function selectPowerPointSlide(file: PresentationFile, page: number) {
+    setPageByFile((current) => ({ ...current, [file.id]: page }))
+    const slide = powerpointSlide(file, page)
+    if (!slide.mediaPath) return
+    onPreview(slide)
+  }
+
+  async function setPage(page: number) {
+    if (!selectedFile || !['pdf', 'ppt', 'pptx', 'pps', 'ppsx'].includes(selectedFile.fileType)) return
+    const nextPage = Math.min(selectedFile.pageCount, Math.max(1, page || 1))
+    setPageByFile((current) => ({ ...current, [selectedFile.id]: nextPage }))
+    if (selectedFile.fileType === 'pdf') return
+    if (powerpointSession?.fileId !== selectedFile.id) {
+      setMessage('Start this file with PowerPoint to create its slide preview.')
+      return
+    }
+    setBusy(true)
+    try {
+      const path = await invoke<string>('export_powerpoint_slide_preview', { request: { fileId: selectedFile.id, page: nextPage } })
+      setPreviewPaths((current) => ({ ...current, [`${selectedFile.id}:${nextPage}`]: path }))
+      onPreview(powerpointSlide(selectedFile, nextPage, path))
+      setMessage(`Slide ${nextPage} is ready to preview.`)
+    } catch (error) { setMessage(String(error)) }
+    finally { setBusy(false) }
+  }
+
+  function addAllPowerPointSlides() {
+    if (!selectedFile || !powerpointSession || powerpointSession.fileId !== selectedFile.id) return
+    const availableSlots = Math.max(0, 500 - showSlideCount)
+    if (powerpointSession.slideCount > availableSlots) { setMessage(`This show has room for ${availableSlots} more slides. Remove items before adding all ${powerpointSession.slideCount} pages.`); return }
+    const slides = Array.from({ length: powerpointSession.slideCount }, (_, index) => powerpointSlide(selectedFile, index + 1, powerpointSession.slideThumbnails[index]))
+    onAddMany(slides)
+    setMessage(`Added all ${slides.length} slides to the current show.`)
+  }
+
+  const fileTypeName = (file: PresentationFile) => file.fileType === 'pdf' ? 'PDF document' : file.fileType === 'odp' ? 'OpenDocument slideshow' : ['pps', 'ppsx'].includes(file.fileType) ? 'PowerPoint slideshow' : 'PowerPoint presentation'
+
+  return <section className="presentation-files-feed">
+    <header className="media-feed-toolbar"><div><strong>Presentation files</strong><span>{visibleFiles.length} matching · {files.length} in this library</span></div><label className="media-import-button">{busy ? 'Importing…' : 'Import files'}<input type="file" accept=".pdf,.ppt,.pptx,.pps,.ppsx,.odp,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple disabled={busy || !isTauri()} onChange={(event) => { void importFiles(event.currentTarget.files); event.currentTarget.value = '' }} /></label></header>
+    {message && <p className="presentation-files-message" role="status">{message}</p>}
+    <div className="presentation-files-body">
+      <nav className="presentation-file-list" aria-label="Presentation files">{visibleFiles.map((file) => <div className="presentation-file-row" key={file.id}><button type="button" className={selectedFile?.id === file.id ? 'selected' : ''} onClick={() => setSelectedFileId(file.id)}><strong>{file.filename}</strong><small>{fileTypeName(file)} · {formatPresentationSize(file.fileSize)}{file.pageCount > 0 ? ` · ${file.pageCount} slides` : ''}</small></button><button type="button" aria-label={`Delete ${file.filename}`} title="Delete file" onClick={() => void removeFile(file)}>×</button></div>)}{!visibleFiles.length && <p>{files.length ? 'No presentation files match this search.' : 'Import PDF, PowerPoint, slideshow, or OpenDocument files to browse them here.'}</p>}</nav>
+      {selectedFile ? <section className="presentation-file-detail" aria-label={selectedFile.filename}>
+        <header><div><strong>{selectedFile.filename}</strong><span>{fileTypeName(selectedFile)} · {formatPresentationSize(selectedFile.fileSize)}</span></div>{['ppt', 'pptx', 'pps', 'ppsx'].includes(selectedFile.fileType) && <div className="presentation-file-actions"><button type="button" className="save-presentation-button" onClick={() => powerpointActive ? void onStopPowerpoint() : void startPowerPoint()} disabled={busy} title="Load slides in BibleShow">{powerpointActive ? 'Stop' : busy ? 'Starting…' : 'Start'}</button><button type="button" onClick={() => onOpenExternal(selectedFile.id)}>Open in PowerPoint</button></div>}<button type="button" onClick={() => void removeFile(selectedFile)}>Delete</button></header>
+        {selectedFile.fileType === 'pdf' ? <>
+          <div className="presentation-pdf-controls"><button type="button" onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1} aria-label="Previous PDF page">‹</button><label>Page<input type="number" min={1} max={selectedFile.pageCount} value={currentPage} onChange={(event) => setPage(Number(event.target.value))} /></label><span>of {selectedFile.pageCount}</span><button type="button" onClick={() => setPage(currentPage + 1)} disabled={currentPage >= selectedFile.pageCount} aria-label="Next PDF page">›</button></div>
+          <div className="presentation-pdf-page" draggable onDragStart={(event) => event.dataTransfer.setData('text/bibleshow-slide', JSON.stringify(pdfSlide(selectedFile, currentPage)))}><PDFPageCanvas localPath={selectedFile.localPath} pageNumber={currentPage} /></div>
+          <div className="presentation-pdf-actions"><button type="button" onClick={() => onPreview(pdfSlide(selectedFile, currentPage))}>Preview page</button><button type="button" className="save-presentation-button" onClick={() => onSendLive(pdfSlide(selectedFile, currentPage))}>Send page Live</button><button type="button" onClick={() => onAdd(pdfSlide(selectedFile, currentPage))}>Add page to show</button><button type="button" onClick={() => onAddMany(Array.from({ length: selectedFile.pageCount }, (_, index) => pdfSlide(selectedFile, index + 1)))} disabled={selectedFile.pageCount > 500}>Add all pages to show</button></div>
+          {selectedFile.pageCount > 500 && <small className="presentation-file-note">This show can contain up to 500 pages. Add PDF pages individually.</small>}
+        </> : ['ppt', 'pptx', 'pps', 'ppsx'].includes(selectedFile.fileType) ? <>
+          <div className="presentation-pdf-controls"><button type="button" onClick={() => void setPage(currentPage - 1)} disabled={busy || !selectedFile.pageCount || currentPage <= 1} aria-label="Previous PowerPoint slide">‹</button><label>Slide<input type="number" min={1} max={selectedFile.pageCount || 1} value={currentPage} disabled={busy || !selectedFile.pageCount} onChange={(event) => void setPage(Number(event.target.value))} /></label><span>of {selectedFile.pageCount || '—'}</span><button type="button" onClick={() => void setPage(currentPage + 1)} disabled={busy || !selectedFile.pageCount || currentPage >= selectedFile.pageCount} aria-label="Next PowerPoint slide">›</button></div>
+          <div className="presentation-ppt-preview">{previewPath && <img src={convertFileSrc(previewPath)} alt={`${selectedFile.filename}, slide ${currentPage}`} />}</div>
+          <div className="presentation-ppt-list-actions"><strong>{powerpointActive ? `${powerpointSession?.slideCount ?? 0} slides` : 'Start to load slides'}</strong><button type="button" onClick={addAllPowerPointSlides} disabled={!powerpointActive || busy || (powerpointSession?.slideCount ?? 0) === 0 || (powerpointSession?.slideCount ?? 0) > Math.max(0, 500 - showSlideCount)}>Add all pages to show</button></div>{powerpointActive && (powerpointSession?.slideCount ?? 0) > Math.max(0, 500 - showSlideCount) && <small className="presentation-file-note">The current show can fit {Math.max(0, 500 - showSlideCount)} more pages. Add slides individually or remove show items.</small>}
+          <div className="presentation-ppt-slides" aria-label={`Slides in ${selectedFile.filename}`}>{powerpointActive && powerpointSession?.slideThumbnails.map((thumbnail, index) => {
+            const page = index + 1
+            const slide = powerpointSlide(selectedFile, page)
+            return <article className={`presentation-ppt-slide-row${currentPage === page ? ' selected' : ''}`} key={page}>
+              <button type="button" className="presentation-ppt-slide-select" draggable onDragStart={(event) => event.dataTransfer.setData('text/bibleshow-slide', JSON.stringify(slide))} onClick={() => selectPowerPointSlide(selectedFile, page)} onDoubleClick={() => void onSendLive(slide)} aria-label={`Preview slide ${page}; double-click to send Live`}><img src={convertFileSrc(thumbnail)} alt="" loading="lazy" /><span>Slide {page}</span></button>
+              <div><button type="button" onClick={() => selectPowerPointSlide(selectedFile, page)} aria-label={`Preview slide ${page}`}>Preview</button><button type="button" className="save-presentation-button" onClick={() => void onSendLive(slide)}>Live</button><button type="button" onClick={() => onAdd(slide)} aria-label={`Add slide ${page} to show`}>Add</button></div>
+            </article>
+          })}</div>
+        </> : <div className="external-presentation-card"><span className="external-presentation-icon">{selectedFile.fileType.toUpperCase()}</span><div><h3>{fileTypeName(selectedFile)}</h3><p>This file opens in the presentation app associated with its format. Its slideshow runs in that app.</p><button type="button" className="save-presentation-button" onClick={() => onOpenExternal(selectedFile.id)}>Open in presentation app</button></div></div>}
+      </section> : <section className="presentation-file-detail presentation-file-empty"><p>Select a presentation file to preview it.</p></section>}
+    </div>
+  </section>
+}
+
+function formatPresentationSize(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function PDFPageCanvas({ localPath, pageNumber }: { localPath: string; pageNumber: number }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null)
+  const [box, setBox] = useState({ width: 0, height: 0 })
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const element = containerRef.current
+    if (!element) return
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect
+      if (rect) setBox({ width: rect.width, height: rect.height })
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    let destroyLoadingTask: (() => void) | null = null
+    void (async () => {
+      try {
+        const { getDocument } = await loadPdfJs()
+        if (!active) return
+        const loadingTask = getDocument({ url: convertFileSrc(localPath) })
+        destroyLoadingTask = () => { void loadingTask.destroy() }
+        if (!active) { destroyLoadingTask(); return }
+        setPdfDocument(await loadingTask.promise)
+      } catch (reason) { if (active) setError(`Could not read this PDF: ${String(reason)}`) }
+    })()
+    return () => { active = false; destroyLoadingTask?.() }
+  }, [localPath])
+
+  useEffect(() => {
+    if (!pdfDocument || !canvasRef.current || box.width < 1 || box.height < 1) return
+    let active = true
+    let rendering: { cancel: () => void; promise: Promise<void> } | null = null
+    const canvas = canvasRef.current
+    void (async () => {
+      try {
+        const page = await pdfDocument.getPage(pageNumber)
+        if (!active) return
+        const baseViewport = page.getViewport({ scale: 1 })
+        const scale = Math.max(0.1, Math.min(box.width / baseViewport.width, box.height / baseViewport.height))
+        const viewport = page.getViewport({ scale })
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+        canvas.width = Math.max(1, Math.floor(viewport.width * pixelRatio))
+        canvas.height = Math.max(1, Math.floor(viewport.height * pixelRatio))
+        canvas.style.width = `${viewport.width}px`
+        canvas.style.height = `${viewport.height}px`
+        rendering = page.render({ canvas, viewport, transform: pixelRatio === 1 ? undefined : [pixelRatio, 0, 0, pixelRatio, 0, 0] })
+        await rendering.promise
+        if (active) setError('')
+      } catch (reason) { if (active) setError(`Could not render PDF page ${pageNumber}: ${String(reason)}`) }
+    })()
+    return () => { active = false; rendering?.cancel() }
+  }, [pdfDocument, pageNumber, box.width, box.height])
+
+  return <div className="pdf-page-canvas" ref={containerRef} aria-label={`PDF page ${pageNumber}`}><canvas ref={canvasRef} />{error && <p role="alert">{error}</p>}</div>
+}
+
+function SavedPresentationsFeed({ presentations, searchQuery, onRefresh, onPreview, onSendLive, onAdd, onAddMany }: {
+  presentations: PresentationSummary[]
+  searchQuery: string
   onRefresh: () => Promise<void>
   onPreview: (slide: PresentationSlide) => void
   onSendLive: (slide: PresentationSlide) => void
   onAdd: (slide: PresentationSlide) => void
   onAddMany: (slides: PresentationSlide[]) => void
 }) {
+  const visiblePresentations = presentations.filter((item) => `${item.title} ${item.updatedAt}`.toLowerCase().includes(searchQuery.trim().toLowerCase()))
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [saved, setSaved] = useState<SavedPresentation | null>(null)
   const [loadError, setLoadError] = useState<{ id: number; text: string } | null>(null)
@@ -954,9 +1680,9 @@ function SavedPresentationsFeed({ presentations, onRefresh, onPreview, onSendLiv
   }, [selectedId])
 
   return <div className="saved-presentations-feed source-browser">
-    <header className="media-feed-toolbar"><div><strong>Saved presentations</strong><span>{presentations.length} projects saved on this device</span></div><button className="media-import-button" onClick={() => { void onRefresh() }}>Refresh</button></header>
+    <header className="media-feed-toolbar"><div><strong>Saved presentations</strong><span>{visiblePresentations.length} matching projects · {presentations.length} saved</span></div><button className="media-import-button" onClick={() => { void onRefresh() }}>Refresh</button></header>
     <div className="saved-presentations-body">
-      <nav className="saved-presentation-list" aria-label="Saved presentations">{presentations.map((item) => <button key={item.id} className={selectedId === item.id ? 'selected' : ''} onClick={() => setSelectedId(item.id)}><strong>{item.title}</strong><span>{item.slideCount} slides · {item.updatedAt}</span></button>)}{presentations.length === 0 && <p>No saved presentations yet. Save a show from the left panel to see it here.</p>}</nav>
+      <nav className="saved-presentation-list" aria-label="Saved presentations">{visiblePresentations.map((item) => <button key={item.id} className={selectedId === item.id ? 'selected' : ''} onClick={() => setSelectedId(item.id)}><strong>{item.title}</strong><span>{item.slideCount} slides · {item.updatedAt}</span></button>)}{visiblePresentations.length === 0 && <p>{presentations.length ? 'No saved presentations match this search.' : 'No saved presentations yet. Save a show from the left panel to see it here.'}</p>}</nav>
       <section className="saved-presentation-detail" aria-label="Presentation items">
         {busy && <p className="source-error">Loading presentation…</p>}
         {message && <p className="source-error">{message}</p>}
@@ -967,17 +1693,83 @@ function SavedPresentationsFeed({ presentations, onRefresh, onPreview, onSendLiv
   </div>
 }
 
-function ThemesFeed({ theme, onSelect }: { theme: PresentationTheme; onSelect: (theme: PresentationTheme) => void }) {
-  const choices: { id: PresentationTheme; name: string; detail: string }[] = [
-    { id: 'classic', name: 'BibleShow Classic', detail: 'Deep green background and clear white text' },
-    { id: 'warm', name: 'Warm Parchment', detail: 'Soft cream background with dark text' },
-    { id: 'midnight', name: 'Midnight Blue', detail: 'Navy background with bright text' },
-  ]
-  return <section className="resource-tool-feed"><header><strong>Themes</strong><span>Choose the shared style for Scripture and lyric slides in Preview, Live, and audience output.</span></header><div className="theme-choice-grid">{choices.map((choice) => <button key={choice.id} className={`theme-choice theme-swatch-${choice.id}${theme === choice.id ? ' selected' : ''}`} aria-pressed={theme === choice.id} onClick={() => onSelect(choice.id)}><span className="theme-choice-sample">Ab</span><span><strong>{choice.name}</strong><small>{choice.detail}</small></span><span className="theme-choice-check">{theme === choice.id ? 'Applied' : 'Apply'}</span></button>)}</div><p>Theme selection is saved on this device and applies immediately. Custom fonts, backgrounds, and per-slide styling can be added in a later editor stage.</p></section>
+function ThemesFeed({ searchQuery, theme, onSelect, liveFeed, resourceRevision }: { searchQuery: string; theme: PresentationTheme; onSelect: (theme: PresentationTheme) => void; liveFeed: PresentationSlide | null; resourceRevision: number }) {
+  const [files, setFiles] = useState<MediaFile[]>([])
+  const [customThemes, setCustomThemes] = useState<SolidTheme[]>(loadCustomThemes)
+  const [name, setName] = useState('')
+  const [backgroundColor, setBackgroundColor] = useState('#263a2e')
+  const [textColor, setTextColor] = useState('#fffef7')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const query = searchQuery.trim().toLowerCase()
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    invoke<MediaFile[]>('get_media_files').then((items) => { if (active) setFiles(items) }).catch((error) => { if (active) setMessage(String(error)) })
+    return () => { active = false }
+  }, [resourceRevision])
+
+  useEffect(() => {
+    try { localStorage.setItem('bibleshow-custom-themes', JSON.stringify(customThemes)) } catch { setMessage('Could not save custom themes on this device.') }
+  }, [customThemes])
+
+  async function importThemeFile(file?: File) {
+    if (!file) return
+    if (!isTauri()) { setMessage('Open BibleShow in the desktop app to import theme images and videos.'); return }
+    setBusy(true)
+    setMessage('')
+    try {
+      const item = await invoke<MediaFile>('import_media_file', new Uint8Array(await file.arrayBuffer()), { headers: { 'x-bibleshow-filename': encodeURIComponent(file.name) } })
+      const updated = await invoke<MediaFile[]>('get_media_files')
+      setFiles(updated)
+      const imported = updated.find((entry) => entry.id === item.id) ?? item
+      onSelect({ kind: 'media', id: `media:${imported.id}`, name: imported.filename, mediaId: imported.id, mediaType: imported.mediaType, mediaPath: imported.localPath, playbackUrl: imported.playbackUrl, textColor: '#ffffff' })
+      setMessage(`Added “${imported.filename}” as a theme.`)
+    } catch (error) { setMessage(String(error)) }
+    finally { setBusy(false) }
+  }
+
+  function saveCustomTheme(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const label = name.trim()
+    if (!label) return
+    const item: SolidTheme = { kind: 'solid', id: `custom:${crypto.randomUUID()}`, name: label, backgroundColor, textColor }
+    setCustomThemes((items) => [...items, item])
+    onSelect(item)
+    setName('')
+    setMessage(`Saved “${label}” to your themes.`)
+  }
+
+  function selectLiveFeed() {
+    if (!liveFeed?.liveStreamKind) return
+    onSelect({ kind: 'live', id: `live:${liveFeed.sourceId}`, name: liveFeed.title, sourceId: liveFeed.sourceId, liveStreamKind: liveFeed.liveStreamKind, liveStreamUrl: liveFeed.liveStreamUrl, youtubeVideoId: liveFeed.youtubeVideoId, textColor: '#ffffff' })
+  }
+
+  const visibleBuiltIns = builtInThemes.filter((item) => !query || `${item.name} solid color`.toLowerCase().includes(query))
+  const visibleCustom = customThemes.filter((item) => !query || `${item.name} custom solid color`.toLowerCase().includes(query))
+  const visibleFiles = files.filter((item) => !query || `${item.filename} image video`.toLowerCase().includes(query))
+  const liveMatches = liveFeed && (!query || `${liveFeed.title} live camera video stream`.toLowerCase().includes(query))
+  const selected = (item: PresentationTheme) => item.id === theme.id
+  const renderSolid = (item: SolidTheme) => <button key={item.id} className={`theme-choice${selected(item) ? ' selected' : ''}`} style={themeStyle(item)} aria-pressed={selected(item)} onClick={() => onSelect(item)}><span className="theme-choice-sample">Ab</span><span><strong>{item.name}</strong><small>{builtInThemes.some((builtIn) => builtIn.id === item.id) ? 'Built-in solid color' : 'Custom solid color'}</small></span><span className="theme-choice-check">{selected(item) ? 'Applied' : 'Apply'}</span></button>
+
+  return <section className="resource-tool-feed themes-feed">
+    <header><strong>Themes</strong><span>Choose a shared background for Scripture and lyric slides in Preview, Live, and audience output.</span></header>
+    <section className="theme-section"><h3>Built-in themes</h3><div className="theme-choice-grid">{visibleBuiltIns.map(renderSolid)}{!visibleBuiltIns.length && <small className="theme-empty">No built-in themes match.</small>}</div></section>
+    <section className="theme-section"><h3>Design a theme</h3><form className="theme-editor" onSubmit={saveCustomTheme}><label>Theme name<input value={name} maxLength={48} onChange={(event) => setName(event.target.value)} placeholder="e.g. Youth service" required /></label><label>Background<input type="color" value={backgroundColor} onChange={(event) => setBackgroundColor(event.target.value)} /></label><label>Text<input type="color" value={textColor} onChange={(event) => setTextColor(event.target.value)} /></label><button type="submit" disabled={!name.trim()}>Save theme</button></form>{visibleCustom.length > 0 && <div className="theme-choice-grid">{visibleCustom.map(renderSolid)}</div>}</section>
+    <section className="theme-section"><div className="theme-section-heading"><h3>Image and video themes</h3><label className="media-import-button">{busy ? 'Importing…' : 'Import image / video'}<input type="file" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm" disabled={busy} onChange={(event) => { void importThemeFile(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} /></label></div><div className="theme-media-grid">{visibleFiles.map((item) => {
+      const isSelected = theme.kind === 'media' && theme.mediaId === item.id
+      const src = item.playbackUrl ?? convertFileSrc(item.localPath)
+      return <button key={item.id} className={`theme-media-card${isSelected ? ' selected' : ''}`} aria-pressed={isSelected} onClick={() => onSelect({ kind: 'media', id: `media:${item.id}`, name: item.filename, mediaId: item.id, mediaType: item.mediaType, mediaPath: item.localPath, playbackUrl: item.playbackUrl, textColor: '#ffffff' })}>{item.mediaType === 'image' ? <img src={src} alt="" /> : <video src={src} muted playsInline preload="metadata" />}<span>{item.filename}</span></button>
+    })}{!visibleFiles.length && <small className="theme-empty">{files.length ? 'No media themes match your search.' : 'Import an image or video to use it as a background.'}</small>}</div></section>
+    <section className="theme-section"><h3>Live feed theme</h3>{liveMatches ? <button className={`theme-live-choice${theme.kind === 'live' && selected(theme) ? ' selected' : ''}`} onClick={selectLiveFeed}><span className="live-status-dot" /><span><strong>{liveFeed.title}</strong><small>Use the currently connected camera or stream behind text</small></span><span>{theme.kind === 'live' && selected(theme) ? 'Applied' : 'Apply'}</span></button> : <small className="theme-empty">Connect a camera or video stream from the Live Feed tab to use it here.</small>}</section>
+    {message && <p className="media-feed-message" role="status">{message}</p>}
+  </section>
 }
 
-function FunctionsFeed({ countdown, onChange }: { countdown: CountdownFunction; onChange: (value: CountdownFunction) => void }) {
+function FunctionsFeed({ searchQuery, countdown, onChange }: { searchQuery: string; countdown: CountdownFunction; onChange: (value: CountdownFunction) => void }) {
   const [minutes, setMinutes] = useState(5)
+  const showCountdown = !searchQuery.trim() || 'service countdown timer'.includes(searchQuery.trim().toLowerCase())
   function start() {
     const seconds = Math.max(60, Math.min(240 * 60, Math.round(minutes) * 60))
     onChange({ durationSeconds: seconds, remainingSeconds: seconds, endsAtMs: currentTimeMs() + seconds * 1000, running: true, visible: true })
@@ -993,10 +1785,10 @@ function FunctionsFeed({ countdown, onChange }: { countdown: CountdownFunction; 
   function reset() {
     onChange({ ...countdown, remainingSeconds: countdown.durationSeconds, endsAtMs: null, running: false, visible: true })
   }
-  return <section className="resource-tool-feed"><header><strong>Functions</strong><span>Small operator tools that can be shown over Live output.</span></header><article className="function-card"><div><strong>Service countdown</strong><small>Start a local countdown and show it as a separate output layer.</small></div><label>Minutes<input type="number" min={1} max={240} step={1} value={minutes} onChange={(event) => setMinutes(Number(event.target.value) || 1)} /></label><div className="function-timer-preview"><CountdownReadout timer={countdown} /></div><div className="function-actions">{!countdown.running && countdown.remainingSeconds === countdown.durationSeconds ? <button className="save-presentation-button" onClick={start}>Start countdown</button> : <button className="save-presentation-button" onClick={togglePause}>{countdown.running ? 'Pause' : countdown.remainingSeconds > 0 ? 'Resume' : 'Start again'}</button>}<button onClick={reset}>Reset</button><button onClick={() => onChange({ ...countdown, visible: !countdown.visible })} aria-pressed={countdown.visible}>{countdown.visible ? 'Hide from output' : 'Show on output'}</button></div><p>The countdown runs on this computer. Pause it before changing its duration. It can be shown or hidden without stopping.</p></article><div className="feed-coming-soon function-roadmap"><strong>More functions</strong><p>Timers are the first working function. Actions, variables, and audience interactions are later additions.</p></div></section>
+  return <section className="resource-tool-feed"><header><strong>Functions</strong><span>Small operator tools that can be shown over Live output.</span></header>{showCountdown ? <article className="function-card"><div><strong>Service countdown</strong><small>Start a local countdown and show it as a separate output layer.</small></div><label>Minutes<input type="number" min={1} max={240} step={1} value={minutes} onChange={(event) => setMinutes(Number(event.target.value) || 1)} /></label><div className="function-timer-preview"><CountdownReadout timer={countdown} /></div><div className="function-actions">{!countdown.running && countdown.remainingSeconds === countdown.durationSeconds ? <button className="save-presentation-button" onClick={start}>Start countdown</button> : <button className="save-presentation-button" onClick={togglePause}>{countdown.running ? 'Pause' : countdown.remainingSeconds > 0 ? 'Resume' : 'Start again'}</button>}<button onClick={reset}>Reset</button><button onClick={() => onChange({ ...countdown, visible: !countdown.visible })} aria-pressed={countdown.visible}>{countdown.visible ? 'Hide from output' : 'Show on output'}</button></div><p>The countdown runs on this computer. Pause it before changing its duration. It can be shown or hidden without stopping.</p></article> : <p className="source-error">No functions match this search.</p>}<div className="feed-coming-soon function-roadmap"><strong>More functions</strong><p>Timers are the first working function. Actions, variables, and audience interactions are later additions.</p></div></section>
 }
 
-function OverlaysFeed({ overlays, onChange }: { overlays: DisplayOverlay[]; onChange: (value: DisplayOverlay[] | ((current: DisplayOverlay[]) => DisplayOverlay[])) => void }) {
+function OverlaysFeed({ searchQuery, overlays, onChange }: { searchQuery: string; overlays: DisplayOverlay[]; onChange: (value: DisplayOverlay[] | ((current: DisplayOverlay[]) => DisplayOverlay[])) => void }) {
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [mode, setMode] = useState<'static' | 'scrolling'>('static')
@@ -1009,7 +1801,8 @@ function OverlaysFeed({ overlays, onChange }: { overlays: DisplayOverlay[]; onCh
     setTitle('')
     setText('')
   }
-  return <section className="resource-tool-feed"><header><strong>Overlays</strong><span>Show one or more text layers over the current Live slide.</span></header><form className="overlay-create-form" onSubmit={addOverlay}><label>Name<input maxLength={80} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Welcome" /></label><label>Text<input maxLength={240} value={text} onChange={(event) => setText(event.target.value)} placeholder="Message shown to the audience" /></label><label>Style<select value={mode} onChange={(event) => setMode(event.target.value as 'static' | 'scrolling')}><option value="static">Static</option><option value="scrolling">Scrolling</option></select></label><button type="submit" className="save-presentation-button" disabled={!title.trim() || !text.trim()}>Add overlay</button></form><div className="overlay-list">{overlays.map((overlay) => <article key={overlay.id} className={overlay.visible ? 'is-visible' : ''}><button className="overlay-toggle" onClick={() => onChange((items) => items.map((item) => item.id === overlay.id ? { ...item, visible: !item.visible } : item))} aria-pressed={overlay.visible}><strong>{overlay.title}</strong><span>{overlay.text}</span></button><small>{overlay.mode === 'scrolling' ? 'Scrolling' : 'Static'}{overlay.locked ? ' · Locked' : ''}</small><button onClick={() => onChange((items) => items.map((item) => item.id === overlay.id ? { ...item, locked: !item.locked } : item))} aria-pressed={overlay.locked}>{overlay.locked ? 'Unlock' : 'Lock'}</button><button onClick={() => onChange((items) => items.filter((item) => item.id !== overlay.id))} aria-label={`Delete ${overlay.title}`}>Delete</button></article>)}{overlays.length === 0 && <p className="overlay-empty">Create your first text overlay. Click its card to show or hide it on Live.</p>}</div><p>Visible overlays are saved on this device. Locked overlays stay on output when unlocked overlays are cleared.</p></section>
+  const visibleOverlays = overlays.filter((overlay) => `${overlay.title} ${overlay.text} ${overlay.mode}`.toLowerCase().includes(searchQuery.trim().toLowerCase()))
+  return <section className="resource-tool-feed"><header><strong>Overlays</strong><span>Show one or more text layers over the current Live slide.</span></header><form className="overlay-create-form" onSubmit={addOverlay}><label>Name<input maxLength={80} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="e.g. Welcome" /></label><label>Text<input maxLength={240} value={text} onChange={(event) => setText(event.target.value)} placeholder="Message shown to the audience" /></label><label>Style<select value={mode} onChange={(event) => setMode(event.target.value as 'static' | 'scrolling')}><option value="static">Static</option><option value="scrolling">Scrolling</option></select></label><button type="submit" className="save-presentation-button" disabled={!title.trim() || !text.trim()}>Add overlay</button></form><div className="overlay-list">{visibleOverlays.map((overlay) => <article key={overlay.id} className={overlay.visible ? 'is-visible' : ''}><button className="overlay-toggle" onClick={() => onChange((items) => items.map((item) => item.id === overlay.id ? { ...item, visible: !item.visible } : item))} aria-pressed={overlay.visible}><strong>{overlay.title}</strong><span>{overlay.text}</span></button><small>{overlay.mode === 'scrolling' ? 'Scrolling' : 'Static'}{overlay.locked ? ' · Locked' : ''}</small><button onClick={() => onChange((items) => items.map((item) => item.id === overlay.id ? { ...item, locked: !item.locked } : item))} aria-pressed={overlay.locked}>{overlay.locked ? 'Unlock' : 'Lock'}</button><button onClick={() => onChange((items) => items.filter((item) => item.id !== overlay.id))} aria-label={`Delete ${overlay.title}`}>Delete</button></article>)}{!visibleOverlays.length && <p className="overlay-empty">{overlays.length ? 'No overlays match this search.' : 'Create your first text overlay. Click its card to show or hide it on Live.'}</p>}</div><p>Visible overlays are saved on this device. Locked overlays stay on output when unlocked overlays are cleared.</p></section>
 }
 
 function CountdownReadout({ timer }: { timer: CountdownFunction }) {
@@ -1034,7 +1827,8 @@ function OverlayStack({ overlays, countdown }: { overlays: DisplayOverlay[]; cou
   return <div className="output-utility-layers" aria-live="polite">{countdown?.visible && <div className="output-countdown"><CountdownReadout timer={countdown} /></div>}{visible.map((overlay, index) => <div key={overlay.id} className={`output-overlay ${overlay.mode}`} style={{ bottom: `calc(8% + ${index * 12}% + ${countdown?.visible ? 11 : 0}%)` }}><span>{overlay.text}</span></div>)}</div>
 }
 
-function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, slide, cameraStream, onPreview, onSendLive }: {
+function NetworkLiveFeed({ searchQuery, onConnect, onConnectCamera, onConnectUrl, onStop, slide, cameraStream, onPreview, onSendLive }: {
+  searchQuery: string
   onConnect: (url: string) => Promise<void>
   onConnectCamera: (stream: MediaStream, label: string) => void
   onConnectUrl: (url: string, kind: 'video' | 'mjpeg' | 'youtube') => void
@@ -1056,6 +1850,7 @@ function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, sli
   const pastedYoutubeId = extractYoutubeVideoId(sourceUrl)
   const connected = Boolean(slide && (slide.liveStreamKind === 'camera' ? cameraStream : slide.liveStreamKind === 'youtube' ? slide.youtubeVideoId : slide.liveStreamUrl))
   const activeSlide = connected ? slide : null
+  const sourceMatches = !searchQuery.trim() || `${activeSlide?.title ?? ''} ${activeSlide?.subtitle ?? ''} ${activeSlide?.liveStreamUrl ?? ''}`.toLowerCase().includes(searchQuery.trim().toLowerCase())
 
   useEffect(() => {
     if (localVideo.current) localVideo.current.srcObject = cameraStream
@@ -1101,18 +1896,19 @@ function NetworkLiveFeed({ onConnect, onConnectCamera, onConnectUrl, onStop, sli
       {sourceMode === 'rtsp' && <><label htmlFor="live-feed-rtsp-url">RTSP / RTSPS address</label><input id="live-feed-rtsp-url" type="password" autoComplete="off" spellCheck={false} placeholder="rtsp://camera.local:554/stream" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} disabled={connected || connecting} /><small>This experimental receiver depends on GStreamer installed on this computer.</small><div><button type="button" className="save-presentation-button" onClick={() => { setConnecting(true); void onConnect(sourceUrl.trim()).finally(() => setConnecting(false)) }} disabled={connected || connecting || !sourceUrl.trim()}>{connecting ? 'Connecting…' : 'Connect and Preview'}</button><button type="button" onClick={() => void onStop()} disabled={!connected}>Stop source</button></div></>}
     </div>
     {feedError && <p className="source-error" role="alert">{feedError}</p>}
-    {activeSlide && <div className="network-live-preview">{activeSlide.liveStreamKind === 'camera' ? <video ref={localVideo} autoPlay muted playsInline /> : activeSlide.liveStreamKind === 'youtube' && activeSlide.youtubeVideoId ? <iframe src={youtubeEmbedUrl(activeSlide.youtubeVideoId, true)} title="YouTube Live preview" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /> : activeSlide.liveStreamKind === 'mjpeg' ? <img src={activeSlide.liveStreamUrl} alt="Live MJPEG feed" onError={() => setFeedError('The MJPEG endpoint could not be loaded. Check the URL and camera network settings.')} /> : <video src={activeSlide.liveStreamUrl} autoPlay muted playsInline onError={() => setFeedError('This stream could not play in the current WebView. Check the URL, format and codec support.')} />}<div><button onClick={() => onPreview(activeSlide)}>Stage in Preview</button><button className="save-presentation-button" onClick={() => onSendLive(activeSlide)}>Send Live</button><button onClick={() => void onStop()}>Stop source</button></div></div>}
+    {activeSlide && sourceMatches && <div className="network-live-preview">{activeSlide.liveStreamKind === 'camera' ? <video ref={localVideo} autoPlay muted playsInline /> : activeSlide.liveStreamKind === 'youtube' && activeSlide.youtubeVideoId ? <iframe src={youtubeEmbedUrl(activeSlide.youtubeVideoId, true)} title="YouTube Live preview" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /> : activeSlide.liveStreamKind === 'mjpeg' ? <img src={activeSlide.liveStreamUrl} alt="Live MJPEG feed" onError={() => setFeedError('The MJPEG endpoint could not be loaded. Check the URL and camera network settings.')} /> : <video src={activeSlide.liveStreamUrl} autoPlay muted playsInline onError={() => setFeedError('This stream could not play in the current WebView. Check the URL, format and codec support.')} />}<div><button onClick={() => onPreview(activeSlide)}>Stage in Preview</button><button className="save-presentation-button" onClick={() => onSendLive(activeSlide)}>Send Live</button><button onClick={() => void onStop()}>Stop source</button></div></div>}
+    {activeSlide && !sourceMatches && <p className="network-live-empty">No connected Live Feed source matches this search.</p>}
     {!activeSlide && <p className="network-live-empty">Choose a camera or direct stream source. One Live Feed source can be active at a time.</p>}
   </section>
 }
 
-function MonitorPanel({ type, slide, nextSlide = null, theme = 'classic', overlays = [], countdown, cameraStream, playback, delayLiveVideo = false, onDelayLiveVideoChange, onPlaybackCommand, onPlaybackTime, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; nextSlide?: PresentationSlide | null; theme?: PresentationTheme; overlays?: DisplayOverlay[]; countdown?: CountdownFunction; cameraStream: MediaStream | null; playback: VideoPlayback | null; delayLiveVideo?: boolean; onDelayLiveVideoChange?: (value: boolean) => void; onPlaybackCommand: (sourceId: string, patch: Partial<VideoPlayback>) => void; onPlaybackTime: (sourceId: string, currentTime: number, duration: number) => void; alert?: { text: string; mode: 'static' | 'scrolling' } | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
+function MonitorPanel({ type, slide, nextSlide = null, theme = defaultTheme, overlays = [], countdown, cameraStream, playback, delayLiveVideo = false, onDelayLiveVideoChange, onPlaybackCommand, onPlaybackTime, alert, emptyLabel, onPrevious, onNext, canNavigate, onAction }: { type: 'preview' | 'live'; slide: PresentationSlide | null; nextSlide?: PresentationSlide | null; theme?: PresentationTheme; overlays?: DisplayOverlay[]; countdown?: CountdownFunction; cameraStream: MediaStream | null; playback: VideoPlayback | null; delayLiveVideo?: boolean; onDelayLiveVideoChange?: (value: boolean) => void; onPlaybackCommand: (sourceId: string, patch: Partial<VideoPlayback>) => void; onPlaybackTime: (sourceId: string, currentTime: number, duration: number) => void; alert?: MessageAlert | null; emptyLabel?: string; onPrevious: () => void; onNext: () => void; canNavigate: boolean; onAction: () => void }) {
   const isPreview = type === 'preview'
   const localPlayback = slide?.kind === 'video' && playback?.sourceId === slide.sourceId ? playback : null
   return (
     <section className={`monitor-panel ${isPreview ? 'monitor-preview' : 'monitor-live'}`}>
       <header className="monitor-heading"><div><span className={`monitor-light ${isPreview ? 'is-preview' : slide ? 'is-live' : ''}`} /><strong>{isPreview ? 'PREVIEW' : 'LIVE'}</strong></div><small>{isPreview ? 'Operator selection' : 'Local Live monitor'}</small></header>
-      <div className="monitor-screen-wrap"><SlideScreen slide={slide} theme={theme} cameraStream={cameraStream} playback={localPlayback} onPlaybackTime={onPlaybackTime} emptyLabel={emptyLabel ?? (isPreview ? 'Choose content to preview' : 'Nothing live yet')} />{!isPreview && <OverlayStack overlays={overlays} countdown={countdown} />}{!isPreview && alert && <div className={`display-alert ${alert.mode}`}><span>{alert.text}</span></div>}</div>
+      <div className="monitor-screen-wrap"><SlideScreen slide={slide} theme={theme} mode={type} cameraStream={cameraStream} playback={localPlayback} onPlaybackTime={onPlaybackTime} emptyLabel={emptyLabel ?? (isPreview ? 'Choose content to preview' : 'Nothing live yet')} />{!isPreview && <OverlayStack overlays={overlays} countdown={countdown} />}{!isPreview && alert && <div className={`display-alert ${alert.mode}`} style={messageAlertStyle(alert, true)}><span>{alert.text}</span></div>}</div>
       {slide?.kind === 'video' && localPlayback && <VideoTransport playback={localPlayback} showDelay={isPreview} delayLiveVideo={delayLiveVideo} onDelayLiveVideoChange={onDelayLiveVideoChange} onCommand={(patch) => onPlaybackCommand(slide.sourceId, patch)} />}
       {!isPreview && nextSlide && <NextSlidePreview slide={nextSlide} />}
       <footer className="monitor-controls">
@@ -1152,7 +1948,7 @@ function formatVideoTime(seconds: number) {
   return `${Math.floor(wholeSeconds / 60)}:${String(wholeSeconds % 60).padStart(2, '0')}`
 }
 
-function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSourceId, searchRequest }: { onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onAdd: (slide: PresentationSlide) => void; onAddMany: (slides: PresentationSlide[]) => void; previewSourceId: string | null; searchRequest: { mode: 'reference' | 'keyword'; query: string; id: number } | null }) {
+function BibleSourcePicker({ onPreview, onSendLive, onPresentSlides, onAdd, onAddMany, previewSourceId, searchRequest, searchQuery, searchMode, onBookNamesChange }: { onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onPresentSlides: (slides: PresentationSlide[]) => void; onAdd: (slide: PresentationSlide) => void; onAddMany: (slides: PresentationSlide[]) => void; previewSourceId: string | null; searchRequest: { mode: 'reference' | 'keyword'; query: string; id: number } | null; searchQuery: string; searchMode: 'reference' | 'keyword'; onBookNamesChange: (names: string[]) => void }) {
   const [books, setBooks] = useState<BookSummary[]>([])
   const [translations, setTranslations] = useState<TranslationSummary[]>([])
   const [translationId, setTranslationId] = useState('KJV')
@@ -1165,13 +1961,23 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
   const [rangeEnd, setRangeEnd] = useState(1)
   const [searchResults, setSearchResults] = useState<BibleSearchResult[]>([])
   const [searchMessage, setSearchMessage] = useState('')
+  const [keywordSuggestions, setKeywordSuggestions] = useState<BibleSearchResult[]>([])
+  const [keywordSuggestionStatus, setKeywordSuggestionStatus] = useState('')
   const pendingRange = useRef<[number, number] | null>(null)
+  const handledSearchRequest = useRef<number | null>(null)
+  const onPresentSlidesRef = useRef(onPresentSlides)
+  useEffect(() => { onPresentSlidesRef.current = onPresentSlides }, [onPresentSlides])
   const activeBook = books.find((book) => book.book_number === bookNumber)
   const currentChapter = chapter?.book_number === bookNumber && chapter.chapter_number === chapterNumber ? chapter : null
   const verse = currentChapter?.verses.find((item) => item.verse_number === verseNumber)
   const slide = verse && currentChapter ? { sourceId: `${translationId}:${bookNumber}:${chapterNumber}:${verseNumber}`, title: `${currentChapter.name} ${chapterNumber}:${verseNumber}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: verse.text, reference: `${currentChapter.name} ${chapterNumber}:${verseNumber}`, kind: 'scripture' as const, translationId, bookNumber, chapterNumber, verseNumber } : null
   const displayError = error || (!isTauri() ? 'Open the desktop app to access the local Bible.' : '')
-  const keywordResultsOpen = searchRequest?.mode === 'keyword' && Boolean(searchMessage)
+  const keywordResultsOpen = searchMode === 'keyword' && searchRequest?.mode === 'keyword' && searchRequest.query.trim() === searchQuery.trim() && Boolean(searchMessage)
+
+  const makeVerseSlide = useCallback((item: { verse_number: number; text: string }, chapterData = currentChapter): PresentationSlide | null => {
+    if (!chapterData) return null
+    return { sourceId: `${translationId}:${chapterData.book_number}:${chapterData.chapter_number}:${item.verse_number}`, title: `${chapterData.name} ${chapterData.chapter_number}:${item.verse_number}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: item.text, reference: `${chapterData.name} ${chapterData.chapter_number}:${item.verse_number}`, kind: 'scripture', translationId, bookNumber: chapterData.book_number, chapterNumber: chapterData.chapter_number, verseNumber: item.verse_number }
+  }, [currentChapter, translationId, translations])
 
   useEffect(() => {
     if (!isTauri()) return
@@ -1183,9 +1989,9 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
   useEffect(() => {
     if (!isTauri()) return
     let active = true
-    invoke<BookSummary[]>('get_bible_books', { translationId }).then((items) => { if (active) { setBooks(items); setBookNumber(items[0]?.book_number ?? 1); setChapterNumber(1) } }).catch((reason) => { if (active) setError(String(reason)) })
+    invoke<BookSummary[]>('get_bible_books', { translationId }).then((items) => { if (active) { setBooks(items); onBookNamesChange(items.map((item) => item.name)); setBookNumber(items[0]?.book_number ?? 1); setChapterNumber(1) } }).catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
-  }, [translationId])
+  }, [translationId, onBookNamesChange])
 
   useEffect(() => {
     if (!books.length) return
@@ -1195,7 +2001,27 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
   }, [books.length, bookNumber, chapterNumber, translationId])
 
   useEffect(() => {
-    if (!searchRequest || !books.length) return
+    const query = searchQuery.trim()
+    const wordCount = query.split(/\s+/u).filter(Boolean).length
+    if (!isTauri() || !books.length || searchMode !== 'keyword' || wordCount < 4 || (searchRequest?.mode === 'keyword' && searchRequest.query.trim() === query)) {
+      setKeywordSuggestions([])
+      setKeywordSuggestionStatus('')
+      return
+    }
+    let active = true
+    setKeywordSuggestions([])
+    setKeywordSuggestionStatus('Searching for passages…')
+    const timer = window.setTimeout(() => {
+      void invoke<BibleSearchResult[]>('search_bible_keyword', { translationId, query, limit: 10 })
+        .then((items) => { if (active) { setKeywordSuggestions(items); setKeywordSuggestionStatus(items.length ? `${items.length} suggested passages` : 'No matching passages yet.') } })
+        .catch((reason) => { if (active) setKeywordSuggestionStatus(String(reason)) })
+    }, 300)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [books.length, searchMode, searchQuery, searchRequest?.mode, searchRequest?.query, translationId])
+
+  useEffect(() => {
+    if (!searchRequest || !books.length || handledSearchRequest.current === searchRequest.id) return
+    handledSearchRequest.current = searchRequest.id
     let active = true
     void Promise.resolve().then(async () => {
       if (!active) return
@@ -1203,7 +2029,7 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
       setSearchMessage('Searching…')
       if (searchRequest.mode === 'keyword') {
         try {
-          const results = await invoke<BibleSearchResult[]>('search_bible_keyword', { translationId, query: searchRequest.query })
+          const results = await invoke<BibleSearchResult[]>('search_bible_keyword', { translationId, query: searchRequest.query, limit: 100 })
           if (active) { setSearchResults(results); setSearchMessage(results.length ? `${results.length} matching verses` : 'No matching verses found.') }
         } catch (reason) { if (active) setSearchMessage(String(reason)) }
         return
@@ -1213,25 +2039,35 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
       if (!match || !book) { setSearchMessage('Enter a reference such as John 3:16 or John 3:16-18.'); return }
       const chap = Number(match[2]), start = Number(match[3]), end = Number(match[4] || match[3])
       if (start < 1 || end < start) { setSearchMessage('Check the verse range and try again.'); return }
-      setSearchMessage('')
-      setBookNumber(book.book_number)
-      setChapterNumber(chap)
-      pendingRange.current = [start, end]
-      if (book.book_number === bookNumber && chap === chapterNumber && currentChapter) { setRangeStart(start); setRangeEnd(Math.min(end, currentChapter.verses.at(-1)?.verse_number ?? end)); setVerseNumber(start); pendingRange.current = null }
+      setSearchMessage('Loading passage…')
+      try {
+        const result = await invoke<ChapterData>('get_bible_chapter', { translationId, bookNumber: book.book_number, chapterNumber: chap })
+        if (!active) return
+        const lastVerse = result.verses.at(-1)?.verse_number ?? 0
+        if (start > lastVerse) { setSearchMessage(`${book.name} ${chap} has no verse ${start}.`); return }
+        const last = Math.min(end, lastVerse)
+        const slides = result.verses.filter((item) => item.verse_number >= start && item.verse_number <= last).map((item) => makeVerseSlide(item, result)).filter((item): item is PresentationSlide => item !== null)
+        setBookNumber(book.book_number)
+        setChapterNumber(chap)
+        setChapter(result)
+        setVerseNumber(start)
+        setRangeStart(start)
+        setRangeEnd(last)
+        pendingRange.current = null
+        setSearchMessage(`Loaded ${book.name} ${chap}:${start}${last === start ? '' : `-${last}`} · ${slides.length} verse slides.`)
+        onPresentSlidesRef.current(slides)
+      } catch (reason) {
+        if (active) setSearchMessage(String(reason))
+      }
     })
     return () => { active = false }
-    // The request ID and loaded library define the search; chapter state is only used to avoid a refetch for an already-open passage.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchRequest?.id, books.length, translationId])
+  }, [searchRequest, books, translationId, makeVerseSlide])
 
-  function makeVerseSlide(item: { verse_number: number; text: string }, chapterData = currentChapter): PresentationSlide | null {
-    if (!chapterData) return null
-    return { sourceId: `${translationId}:${chapterData.book_number}:${chapterData.chapter_number}:${item.verse_number}`, title: `${chapterData.name} ${chapterData.chapter_number}:${item.verse_number}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: item.text, reference: `${chapterData.name} ${chapterData.chapter_number}:${item.verse_number}`, kind: 'scripture', translationId, bookNumber: chapterData.book_number, chapterNumber: chapterData.chapter_number, verseNumber: item.verse_number }
+  function searchResultSlide(result: BibleSearchResult): PresentationSlide {
+    return { sourceId: `${translationId}:${result.book_number}:${result.chapter_number}:${result.verse_number}`, title: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: result.text, reference: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, kind: 'scripture', translationId, bookNumber: result.book_number, chapterNumber: result.chapter_number, verseNumber: result.verse_number }
   }
 
   function selectSearchResult(result: BibleSearchResult) {
-    setSearchResults([])
-    setSearchMessage('')
     const foundBook = books.find((item) => item.book_number === result.book_number)
     if (foundBook) {
       setBookNumber(foundBook.book_number)
@@ -1242,30 +2078,92 @@ function BibleSourcePicker({ onPreview, onSendLive, onAdd, onAddMany, previewSou
         setRangeEnd(result.verse_number)
       } else pendingRange.current = [result.verse_number, result.verse_number]
     }
-    const resultSlide: PresentationSlide = { sourceId: `${translationId}:${result.book_number}:${result.chapter_number}:${result.verse_number}`, title: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: result.text, reference: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, kind: 'scripture', translationId, bookNumber: result.book_number, chapterNumber: result.chapter_number, verseNumber: result.verse_number }
-    onPreview(resultSlide)
+    setKeywordSuggestions([])
+    setKeywordSuggestionStatus('')
+    onPreview(searchResultSlide(result))
   }
 
   return (
     <div className="source-browser">
-      {keywordResultsOpen ? <div className="bible-search-results expanded"><span>{searchMessage}</span>{searchResults.map((result) => <button key={`${result.book_number}-${result.chapter_number}-${result.verse_number}`} onClick={() => selectSearchResult(result)}><strong>{result.book_name} {result.chapter_number}:{result.verse_number}</strong><span>{result.text}</span></button>)}</div> : <>
+      {keywordResultsOpen ? <div className="bible-search-results expanded"><span>{searchMessage}</span>{searchResults.map((result) => <button key={`${result.book_number}-${result.chapter_number}-${result.verse_number}`} onClick={() => selectSearchResult(result)} onDoubleClick={() => onSendLive({ sourceId: `${translationId}:${result.book_number}:${result.chapter_number}:${result.verse_number}`, title: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: result.text, reference: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, kind: 'scripture', translationId, bookNumber: result.book_number, chapterNumber: result.chapter_number, verseNumber: result.verse_number })} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); const slide = { sourceId: `${translationId}:${result.book_number}:${result.chapter_number}:${result.verse_number}`, title: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, subtitle: translations.find((item) => item.id === translationId)?.name ?? translationId, body: result.text, reference: `${result.book_name} ${result.chapter_number}:${result.verse_number}`, kind: 'scripture' as const, translationId, bookNumber: result.book_number, chapterNumber: result.chapter_number, verseNumber: result.verse_number }; onSendLive(slide) } }}><strong>{result.book_name} {result.chapter_number}:{result.verse_number}</strong><span>{result.text}</span></button>)}</div> : <>
       <div className="source-selects">
         <label>Version<select value={translationId} onChange={(event) => setTranslationId(event.target.value)}>{translations.map((translation) => <option key={translation.id} value={translation.id}>{translation.name}</option>)}</select></label>
         <label>Book<select value={bookNumber} onChange={(event) => { setBookNumber(Number(event.target.value)); setChapterNumber(1) }} disabled={!books.length}>{books.map((book) => <option key={book.book_number} value={book.book_number}>{book.name}</option>)}</select></label>
         <label>Chapter<select value={chapterNumber} onChange={(event) => setChapterNumber(Number(event.target.value))} disabled={!activeBook}>{Array.from({ length: activeBook?.chapter_count ?? 0 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select></label>
       </div>
-      <div className="passage-range"><span>Passage slides</span><label>From<select value={rangeStart} onChange={(event) => setRangeStart(Number(event.target.value))} disabled={!currentChapter}>{currentChapter?.verses.map((item) => <option key={item.verse_number} value={item.verse_number}>{item.verse_number}</option>)}</select></label><label>To<select value={rangeEnd} onChange={(event) => setRangeEnd(Number(event.target.value))} disabled={!currentChapter}>{currentChapter?.verses.filter((item) => item.verse_number >= rangeStart).map((item) => <option key={item.verse_number} value={item.verse_number}>{item.verse_number}</option>)}</select></label><button disabled={!currentChapter || rangeEnd < rangeStart} onClick={() => { const data = currentChapter; if (!data) return; const slides = data.verses.filter((item) => item.verse_number >= rangeStart && item.verse_number <= rangeEnd).map((item) => makeVerseSlide(item, data)).filter((item): item is PresentationSlide => item !== null); onAddMany(slides) }}>Add passage</button></div>
+      <div className="passage-range"><span>Passage slides</span><label>From<select value={rangeStart} onChange={(event) => setRangeStart(Number(event.target.value))} disabled={!currentChapter}>{currentChapter?.verses.map((item) => <option key={item.verse_number} value={item.verse_number}>{item.verse_number}</option>)}</select></label><label>To<select value={rangeEnd} onChange={(event) => setRangeEnd(Number(event.target.value))} disabled={!currentChapter}>{currentChapter?.verses.filter((item) => item.verse_number >= rangeStart).map((item) => <option key={item.verse_number} value={item.verse_number}>{item.verse_number}</option>)}</select></label><button disabled={!currentChapter || rangeEnd < rangeStart} onClick={() => { const data = currentChapter; if (!data) return; const slides = data.verses.filter((item) => item.verse_number >= rangeStart && item.verse_number <= rangeEnd).map((item) => makeVerseSlide(item, data)).filter((item): item is PresentationSlide => item !== null); onAddMany(slides) }}>Add passage</button><button disabled={!currentChapter || rangeEnd < rangeStart} onClick={() => { const data = currentChapter; if (!data) return; const slides = data.verses.filter((item) => item.verse_number >= rangeStart && item.verse_number <= rangeEnd).map((item) => makeVerseSlide(item, data)).filter((item): item is PresentationSlide => item !== null); onPresentSlides(slides) }}>Preview &amp; Live</button></div>
+      {keywordSuggestionStatus && !keywordResultsOpen && <section className="bible-keyword-suggestions" aria-label="Suggested Bible passages"><header><strong>{keywordSuggestionStatus}</strong><small>Updates as you type</small></header>{keywordSuggestions.map((result) => <button key={`suggestion-${result.book_number}-${result.chapter_number}-${result.verse_number}`} type="button" onClick={() => selectSearchResult(result)} onDoubleClick={() => onSendLive(searchResultSlide(result))} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); onSendLive(searchResultSlide(result)) } }}><strong>{result.book_name} {result.chapter_number}:{result.verse_number}</strong><span>{result.text}</span></button>)}</section>}
+      {searchMessage && searchRequest?.mode === searchMode && searchRequest.query.trim() === searchQuery.trim() && <p className="source-search-status" role="status">{searchMessage}</p>}
       <div className="source-list-heading"><span>VERSE</span><span>{translations.find((item) => item.id === translationId)?.id ?? 'KJV'}</span></div>
       <div className="source-verse-list">{currentChapter?.verses.map((item) => {
         const verseSlide = makeVerseSlide(item)
         if (!verseSlide) return null
         const isPreview = previewSourceId === verseSlide.sourceId
-        return <button className={`source-verse-row${item.verse_number === verseNumber ? ' selected' : ''}${isPreview ? ' is-preview' : ''}`} key={item.verse_number} aria-pressed={isPreview} draggable onDragStart={(event) => event.dataTransfer.setData('text/bibleshow-slide', JSON.stringify(verseSlide))} onClick={() => { setVerseNumber(item.verse_number); setRangeStart(item.verse_number); setRangeEnd(item.verse_number); onPreview(verseSlide) }} onDoubleClick={() => onSendLive(verseSlide)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); onSendLive(verseSlide) } }}><sup>{item.verse_number}</sup><span>{item.text}</span>{isPreview && <small>PREVIEW</small>}</button>
+        const inPassage = item.verse_number >= rangeStart && item.verse_number <= rangeEnd
+        return <button className={`source-verse-row${item.verse_number === verseNumber ? ' selected' : ''}${inPassage ? ' in-passage' : ''}${isPreview ? ' is-preview' : ''}`} key={item.verse_number} aria-pressed={isPreview} draggable onDragStart={(event) => event.dataTransfer.setData('text/bibleshow-slide', JSON.stringify(verseSlide))} onClick={() => { setVerseNumber(item.verse_number); setRangeStart(item.verse_number); setRangeEnd(item.verse_number); onPreview(verseSlide) }} onDoubleClick={() => onSendLive(verseSlide)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); onSendLive(verseSlide) } }}><sup>{item.verse_number}</sup><span>{item.text}</span>{isPreview && <small>PREVIEW</small>}</button>
       })}{displayError && <p className="source-error">{displayError}</p>}</div>
       <div className="source-actions"><button onClick={() => slide && onPreview(slide)} disabled={!slide}>Preview verse</button><button onClick={() => slide && onAdd(slide)} disabled={!slide}><Icon name="plus" size={14} /> Add to sequence</button></div>
       </>}
     </div>
   )
+}
+
+function parseFormattedLyricHeader(line: string): SongDetail['sections'][number] | null {
+  const bracketed = /^\s*\[[^\]]+\]\s*:?\s*$/.test(line)
+  const value = line.trim().replace(/^\[|\]$/g, '').trim().replace(/:$/, '').trim()
+  const normalized = value.toLowerCase().replace(/\s+/g, ' ')
+  const verse = normalized.match(/^(?:verse|v)\s*#?(\d*)$/)
+  if (verse && (verse[1] || normalized !== 'v' || bracketed)) return { section_type: 'verse', label: verse[1] ? `Verse ${verse[1]}` : 'Verse', lyrics: '' }
+  if (/^(?:chorus|refrain)\s*\d*$/.test(normalized) || /^c\d+$/.test(normalized) || (normalized === 'c' && bracketed)) return { section_type: 'chorus', label: 'Chorus', lyrics: '' }
+  if (/^bridge\s*\d*$/.test(normalized) || /^b\d+$/.test(normalized) || (normalized === 'b' && bracketed)) return { section_type: 'bridge', label: 'Bridge', lyrics: '' }
+  if (/^(?:pre[ -]?chorus\s*\d*|p\s*\d+)$/.test(normalized) || (normalized === 'p' && bracketed)) return { section_type: 'pre-chorus', label: 'Pre-Chorus', lyrics: '' }
+  if (/^intro\s*\d*$/.test(normalized) || /^i\d+$/.test(normalized) || (normalized === 'i' && bracketed)) return { section_type: 'intro', label: 'Intro', lyrics: '' }
+  if (/^(?:outro|ending)\s*\d*$/.test(normalized) || /^[oe]\d+$/.test(normalized) || ((normalized === 'e' || normalized === 'o') && bracketed)) return { section_type: 'outro', label: 'Ending', lyrics: '' }
+  const numberedVerse = normalized.match(/^(\d+)[.)]?$/)
+  if (numberedVerse) return { section_type: 'verse', label: `Verse ${numberedVerse[1]}`, lyrics: '' }
+  return null
+}
+
+function splitFormattedSongSections(sections: SongDetail['sections']): SongDetail['sections'] {
+  const expanded: SongDetail['sections'] = []
+  sections.forEach((section) => {
+    const lines = section.lyrics.replace(/\r\n?/g, '\n').split('\n')
+    const hasHeaders = lines.some((line) => parseFormattedLyricHeader(line) !== null)
+    if (hasHeaders) {
+      let currentType = section.section_type
+      let currentLabel = section.label
+      let currentLines: string[] = []
+      let nextVerseNumber = Number(section.label.match(/\d+/)?.[0] ?? 0)
+      const flush = () => {
+        const lyrics = currentLines.join('\n').trim()
+        if (lyrics) expanded.push({ section_type: currentType, label: currentLabel, lyrics })
+        currentLines = []
+      }
+      for (const line of lines) {
+        const header = parseFormattedLyricHeader(line)
+        if (!header) { currentLines.push(line); continue }
+        flush()
+        currentType = header.section_type
+        currentLabel = header.label
+        if (currentType === 'verse') {
+          const number = Number(currentLabel.match(/\d+/)?.[0] ?? 0)
+          nextVerseNumber = number || nextVerseNumber + 1
+          currentLabel = `Verse ${nextVerseNumber}`
+        }
+      }
+      flush()
+      return
+    }
+
+    const paragraphs = section.lyrics.replace(/\r\n?/g, '\n').split(/\n\s*\n+/).map((text) => text.trim()).filter(Boolean)
+    if (sections.length === 1 && paragraphs.length > 1 && ['verse', 'section'].includes(section.section_type)) {
+      const firstVerse = Number(section.label.match(/\d+/)?.[0] ?? 1)
+      paragraphs.forEach((lyrics, index) => expanded.push({ section_type: 'verse', label: `Verse ${firstVerse + index}`, lyrics }))
+      return
+    }
+    expanded.push(section)
+  })
+  return expanded
 }
 
 function lyricSectionLabel(section: SongDetail['sections'][number], index: number) {
@@ -1274,27 +2172,42 @@ function lyricSectionLabel(section: SongDetail['sections'][number], index: numbe
   return section.section_type.replace('-', ' ').replace(/^./, (letter) => letter.toUpperCase())
 }
 
-function SongSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onAdd: (slide: PresentationSlide) => void; previewSourceId: string | null }) {
+function SongSourcePicker({ searchQuery, presentRequest, selectedSongIds, onSelectedSongIdsChange, onEditSong, onAddSong, onDeleteSongs, onExportSongs, onPreview, onSendLive, onPresentSlides, onAdd, previewSourceId }: { searchQuery: string; presentRequest: { query: string; id: number } | null; selectedSongIds: string[]; onSelectedSongIdsChange: (ids: string[]) => void; onEditSong: (id: string) => void; onAddSong: () => void; onDeleteSongs: (ids: string[]) => void; onExportSongs: (ids: string[]) => void; onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onPresentSlides: (slides: PresentationSlide[]) => void; onAdd: (slide: PresentationSlide) => void; previewSourceId: string | null }) {
   const [category, setCategory] = useState<'all' | 'hymn' | 'song'>('all')
-  const [search, setSearch] = useState('')
   const [songs, setSongs] = useState<SongSummary[]>([])
   const [selectedSongId, setSelectedSongId] = useState('')
   const [detail, setDetail] = useState<SongDetail | null>(null)
   const [error, setError] = useState('')
+  const [contextMenu, setContextMenu] = useState<{ songId: string | null; x: number; y: number } | null>(null)
+  const handledPresentRequest = useRef<number | null>(null)
+  const selectedSongIdRef = useRef(selectedSongId)
+  const onPresentSlidesRef = useRef(onPresentSlides)
+  useEffect(() => { selectedSongIdRef.current = selectedSongId }, [selectedSongId])
+  useEffect(() => { onPresentSlidesRef.current = onPresentSlides }, [onPresentSlides])
   const currentDetail = detail?.id === selectedSongId ? detail : null
+  const visibleSections = currentDetail ? splitFormattedSongSections(currentDetail.sections) : []
   const displayError = error || (!isTauri() ? 'Open the desktop app to access local lyrics.' : '')
+
+  useEffect(() => {
+    if (!contextMenu) return
+    const dismiss = () => setContextMenu(null)
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') dismiss() }
+    window.addEventListener('click', dismiss)
+    window.addEventListener('keydown', onKeyDown)
+    return () => { window.removeEventListener('click', dismiss); window.removeEventListener('keydown', onKeyDown) }
+  }, [contextMenu])
 
   useEffect(() => {
     if (!isTauri()) return
     let active = true
-    invoke<SongSummary[]>('get_song_library', { category, search }).then((items) => {
+    invoke<SongSummary[]>('get_song_library', { category, search: searchQuery }).then((items) => {
       if (!active) return
       setSongs(items)
       setSelectedSongId((current) => items.some((song) => song.id === current) ? current : items[0]?.id ?? '')
-      setError(items.length ? '' : 'No matching lyrics. Use the Lyrics import controls above to add songs or hymns.')
+      setError(items.length ? '' : searchQuery ? 'No matching lyrics. Try another title, author, or word.' : 'No matching lyrics. Use the import button to add songs or hymns.')
     }).catch((reason) => { if (active) setError(String(reason)) })
     return () => { active = false }
-  }, [category, search])
+  }, [category, searchQuery])
 
   useEffect(() => {
     if (!selectedSongId) return
@@ -1303,8 +2216,41 @@ function SongSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { o
     return () => { active = false }
   }, [selectedSongId])
 
+  function makeSongSlides(song: SongDetail): PresentationSlide[] {
+    return splitFormattedSongSections(song.sections).map((section, sectionIndex) => {
+      const label = lyricSectionLabel(section, sectionIndex)
+      return { sourceId: `song:${song.id}:${sectionIndex}`, title: song.title, subtitle: label, body: section.lyrics, reference: song.authors || (song.category === 'hymn' ? 'Hymn' : 'Song'), kind: 'lyrics' as const, songId: song.id, sectionIndex }
+    })
+  }
+
+  useEffect(() => {
+    if (!presentRequest || !isTauri() || handledPresentRequest.current === presentRequest.id) return
+    handledPresentRequest.current = presentRequest.id
+    let active = true
+    void (async () => {
+      try {
+        const matches = await invoke<SongSummary[]>('get_song_library', { category, search: presentRequest.query })
+        if (!active) return
+        const selected = matches.find((song) => song.id === selectedSongIdRef.current) ?? matches[0]
+        if (!selected) { setError('No matching lyrics were found to send.'); return }
+        setSongs(matches)
+        setSelectedSongId(selected.id)
+        const song = await invoke<SongDetail>('get_song_detail', { songId: selected.id })
+        if (!active) return
+        setDetail(song)
+        const slides = makeSongSlides(song)
+        if (!slides.length) { setError('This song has no lyric sections to send.'); return }
+        setError('')
+        onPresentSlidesRef.current(slides)
+      } catch (reason) {
+        if (active) setError(String(reason))
+      }
+    })()
+    return () => { active = false }
+  }, [presentRequest, category])
+
   function makeSlide(sectionIndex: number): PresentationSlide | null {
-    const section = currentDetail?.sections[sectionIndex]
+    const section = visibleSections[sectionIndex]
     if (!currentDetail || !section) return null
     const label = lyricSectionLabel(section, sectionIndex)
     return { sourceId: `song:${currentDetail.id}:${sectionIndex}`, title: currentDetail.title, subtitle: label, body: section.lyrics, reference: currentDetail.authors || (currentDetail.category === 'hymn' ? 'Hymn' : 'Song'), kind: 'lyrics', songId: currentDetail.id, sectionIndex }
@@ -1312,26 +2258,156 @@ function SongSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { o
 
   return (
     <div className="source-browser song-source-browser">
-      <label className="source-search"><Icon name="search" size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search titles or authors" /></label>
       <div className="source-category-tabs" role="tablist" aria-label="Filter lyrics">{(['all', 'hymn', 'song'] as const).map((item) => <button key={item} className={category === item ? 'selected' : ''} role="tab" aria-selected={category === item} onClick={() => setCategory(item)}>{item === 'all' ? 'All' : item === 'hymn' ? 'Hymns' : 'Songs'}</button>)}</div>
-      <div className="source-song-list">{songs.map((song) => <button className={`source-song-item${selectedSongId === song.id ? ' selected' : ''}`} onClick={() => setSelectedSongId(song.id)} key={song.id}><strong>{song.title}</strong><small>{song.authors || song.category}</small></button>)}{!songs.length && <p className="source-error">{displayError || 'No lyrics found.'}</p>}</div>
-      {currentDetail && <div className="source-sections"><div className="source-list-heading"><span>{currentDetail.title}</span><span>{currentDetail.sections.length} PAGES</span></div>{currentDetail.sections.map((section, index) => {
+      <div className="source-song-list" onContextMenu={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setContextMenu({ songId: null, x: event.clientX, y: event.clientY }) } }}>
+        {songs.map((song) => <div className="source-song-row" key={song.id} onContextMenu={(event) => { event.preventDefault(); setContextMenu({ songId: song.id, x: event.clientX, y: event.clientY }) }}>
+          <button className={`source-song-item${selectedSongId === song.id ? ' selected' : ''}`} onClick={() => setSelectedSongId(song.id)}><strong>{song.title}</strong><small>{song.authors || song.category}</small></button>
+          <input type="checkbox" aria-label={`Select ${song.title} for batch actions`} checked={selectedSongIds.includes(song.id)} onChange={(event) => onSelectedSongIdsChange(event.target.checked ? [...selectedSongIds, song.id] : selectedSongIds.filter((id) => id !== song.id))} />
+        </div>)}
+        {!songs.length && <p className="source-error">{displayError || 'No lyrics found.'}</p>}
+      </div>
+      {contextMenu && <div className="lyrics-context-menu" role="menu" style={{ left: Math.min(contextMenu.x, window.innerWidth - 220), top: Math.min(contextMenu.y, window.innerHeight - 190) }} onClick={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
+        <strong>{contextMenu.songId ? songs.find((song) => song.id === contextMenu.songId)?.title ?? 'Song actions' : 'Lyrics library'}</strong>
+        <button role="menuitem" onClick={() => { onAddSong(); setContextMenu(null) }}>Add new song</button>
+        {contextMenu.songId && <>
+          <button role="menuitem" onClick={() => { onEditSong(contextMenu.songId!); setContextMenu(null) }}>Edit song</button>
+          <button role="menuitem" onClick={() => { onExportSongs([contextMenu.songId!]); setContextMenu(null) }}>Export song</button>
+          <button role="menuitem" className="danger" onClick={() => { onDeleteSongs([contextMenu.songId!]); setContextMenu(null) }}>Delete song</button>
+        </>}
+      </div>}
+      {currentDetail && <div className="source-sections"><div className="source-list-heading"><span>{currentDetail.title}</span><span>{visibleSections.length} PAGES</span></div>{visibleSections.map((section, index) => {
         const slide = makeSlide(index)
         const isPreview = slide?.sourceId === previewSourceId
-        return <div className={`source-section-item${isPreview ? ' is-preview' : ''}`} key={`${section.label}-${index}`}><button aria-label={`Preview ${lyricSectionLabel(section, index)} from ${currentDetail.title}; press Enter or double-click to send Live`} aria-pressed={isPreview} draggable onDragStart={(event) => slide && event.dataTransfer.setData('text/bibleshow-slide', JSON.stringify(slide))} onClick={() => slide && onPreview(slide)} onDoubleClick={() => slide && onSendLive(slide)} onKeyDown={(event) => { if (event.key === 'Enter' && slide) { event.preventDefault(); event.stopPropagation(); onSendLive(slide) } }}><strong>{lyricSectionLabel(section, index)}</strong><small>{section.lyrics.replace(/\n/g, ' ').slice(0, 52)}</small></button><button onClick={() => slide && onAdd(slide)} aria-label={`Add ${lyricSectionLabel(section, index)} to sequence`}><Icon name="plus" size={14} /></button></div>
+        return <div className={`source-section-item${isPreview ? ' is-preview' : ''}`} key={`${section.label}-${index}`}><button aria-label={`Preview ${lyricSectionLabel(section, index)} from ${currentDetail.title}; press Enter or double-click to send Live`} aria-pressed={isPreview} draggable onDragStart={(event) => slide && event.dataTransfer.setData('text/bibleshow-slide', JSON.stringify(slide))} onClick={() => slide && onPreview(slide)} onDoubleClick={() => slide && onSendLive(slide)} onKeyDown={(event) => { if (event.key === 'Enter' && slide) { event.preventDefault(); event.stopPropagation(); onSendLive(slide) } }}><strong>{lyricSectionLabel(section, index)}</strong><span className="source-section-lyrics">{section.lyrics}</span></button><button onClick={() => slide && onAdd(slide)} aria-label={`Add ${lyricSectionLabel(section, index)} to sequence`}><Icon name="plus" size={14} /></button></div>
       })}</div>}
       {displayError && !songs.length && <p className="source-error">{displayError}</p>}
     </div>
   )
 }
 
-function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onAdd: (slide: PresentationSlide) => void; previewSourceId: string | null }) {
+type SongSectionDraft = { sectionType: string; label: string; lyrics: string }
+
+function SongEditorDialog({ songId, onClose, onSaved }: { songId: string | null; onClose: () => void; onSaved: () => void }) {
+  const [title, setTitle] = useState('')
+  const [authors, setAuthors] = useState('')
+  const [copyright, setCopyright] = useState('')
+  const [category, setCategory] = useState<'song' | 'hymn'>('song')
+  const [sections, setSections] = useState<SongSectionDraft[]>([{ sectionType: 'verse', label: 'Verse 1', lyrics: '' }])
+  const [busy, setBusy] = useState(Boolean(songId))
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    if (!songId || !isTauri()) return
+    let active = true
+    invoke<SongDetail>('get_song_detail', { songId }).then((song) => {
+      if (!active) return
+      setTitle(song.title)
+      setAuthors(song.authors)
+      setCopyright(song.copyright)
+      setCategory(song.category === 'hymn' ? 'hymn' : 'song')
+      setSections(song.sections.map((section) => ({ sectionType: section.section_type, label: section.label, lyrics: section.lyrics })))
+    }).catch((error) => { if (active) setMessage(String(error)) }).finally(() => { if (active) setBusy(false) })
+    return () => { active = false }
+  }, [songId])
+
+  function addSection() {
+    if (sections.length >= 100) return
+    const verseCount = sections.filter((section) => section.sectionType === 'verse').length
+    setSections((current) => [...current, { sectionType: 'verse', label: `Verse ${verseCount + 1}`, lyrics: '' }])
+  }
+
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!isTauri()) { setMessage('Open BibleShow in the desktop app to save lyrics.'); return }
+    setBusy(true)
+    setMessage('')
+    try {
+      await invoke<SongDetail>('save_song', { songId, title, authors, copyright, category, sections })
+      onSaved()
+    } catch (error) { setMessage(String(error)) }
+    finally { setBusy(false) }
+  }
+
+  return <div className="project-change-backdrop lyrics-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <form className="project-change-dialog song-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="song-editor-title" onSubmit={(event) => void save(event)}>
+      <header><h2 id="song-editor-title">{songId ? 'Edit song or hymn' : 'Add a song or hymn'}</h2><button type="button" aria-label="Close song editor" onClick={onClose}>×</button></header>
+      {message && <p className="song-dialog-message" role="alert">{message}</p>}
+      <div className="song-editor-meta"><label>Title<input autoFocus required maxLength={160} value={title} onChange={(event) => setTitle(event.target.value)} /></label><label>Type<select value={category} onChange={(event) => setCategory(event.target.value as 'song' | 'hymn')}><option value="song">Song</option><option value="hymn">Hymn</option></select></label><label>Author<input maxLength={500} value={authors} onChange={(event) => setAuthors(event.target.value)} /></label><label>Copyright<input maxLength={500} value={copyright} onChange={(event) => setCopyright(event.target.value)} /></label></div>
+      <div className="song-editor-sections"><div className="song-editor-section-heading"><strong>Verses and chorus</strong><button type="button" onClick={addSection} disabled={sections.length >= 100}>Add section</button></div>
+        {sections.map((section, index) => <section className="song-editor-section" key={index}><div><label>Section<select value={section.sectionType} onChange={(event) => setSections((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, sectionType: event.target.value } : item))}><option value="verse">Verse</option><option value="chorus">Chorus</option><option value="bridge">Bridge</option><option value="pre-chorus">Pre-chorus</option><option value="intro">Intro</option><option value="outro">Outro</option></select></label><label>Label<input maxLength={60} value={section.label} onChange={(event) => setSections((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))} /></label><button type="button" className="remove-song-section" onClick={() => setSections((current) => current.filter((_, itemIndex) => itemIndex !== index))} disabled={sections.length === 1}>Remove</button></div><textarea aria-label={`${section.label || `Section ${index + 1}`} lyrics`} maxLength={4000} rows={4} value={section.lyrics} placeholder="Enter the lyrics for this section" onChange={(event) => setSections((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, lyrics: event.target.value } : item))} /></section>)}
+      </div>
+      <footer><span>Changes are saved to this device’s lyrics library.</span><button type="button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="save-presentation-button" disabled={busy || !title.trim()}>{busy ? 'Saving…' : 'Save song'}</button></footer>
+    </form>
+  </div>
+}
+
+function SongExportDialog({ songIds, onClose }: { songIds: string[]; onClose: () => void }) {
+  const single = songIds.length === 1
+  const [format, setFormat] = useState<'csv' | 'openlyrics' | 'opensong' | 'txt'>('csv')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+
+  function escapeXml(value: string) { return value.replace(/[<>&"']/g, (character) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[character]!) }
+  function quoteCsv(value: string) { return `"${value.replace(/"/g, '""')}"` }
+  function sectionedLyrics(song: SongDetail) { return song.sections.map((section) => `[${section.label || section.section_type}]\n${section.lyrics}`).join('\n\n') }
+
+  async function exportSelected() {
+    if (!isTauri()) { setMessage('Open BibleShow in the desktop app to export library songs.'); return }
+    setBusy(true)
+    setMessage('')
+    try {
+      const songs = await Promise.all(songIds.map((songId) => invoke<SongDetail>('get_song_detail', { songId })))
+      let content = ''
+      let extension = 'csv'
+      let mime = 'text/csv;charset=utf-8'
+      if (format === 'csv') {
+        content = [['title', 'authors', 'copyright', 'category', 'lyrics'].join(','), ...songs.map((song) => [song.title, song.authors, song.copyright, song.category, sectionedLyrics(song)].map(quoteCsv).join(','))].join('\r\n')
+      } else {
+        const song = songs[0]
+        if (!song) throw new Error('Select at least one song to export.')
+        if (format === 'openlyrics') {
+          extension = 'xml'; mime = 'application/xml;charset=utf-8'
+          const verseCounts: Record<string, number> = {}
+          const lyricSections = song.sections.map((section) => {
+            const type = section.section_type === 'verse' ? 'v' : section.section_type === 'chorus' ? 'c' : section.section_type === 'bridge' ? 'b' : section.section_type === 'pre-chorus' ? 'p' : section.section_type === 'intro' ? 'i' : section.section_type === 'outro' ? 'o' : 's'
+            verseCounts[type] = (verseCounts[type] ?? 0) + 1
+            const number = section.label.match(/\d+/)?.[0] ?? String(verseCounts[type])
+            const lines = escapeXml(section.lyrics).replace(/\r\n?/g, '\n').replace(/\n/g, '<br/>')
+            return `<verse name="${type}${number}"><lines>${lines}</lines></verse>`
+          }).join('')
+          content = `<?xml version="1.0" encoding="UTF-8"?><song xmlns="http://openlyrics.info/namespace/2009/song"><properties><titles><title>${escapeXml(song.title)}</title></titles><authors>${song.authors ? `<author>${escapeXml(song.authors)}</author>` : ''}</authors><copyright>${escapeXml(song.copyright)}</copyright></properties><lyrics>${lyricSections}</lyrics></song>`
+        } else if (format === 'opensong') {
+          extension = 'ost'; mime = 'application/xml;charset=utf-8'
+          const lyrics = escapeXml(sectionedLyrics(song))
+          content = `<?xml version="1.0" encoding="UTF-8"?><song><title>${escapeXml(song.title)}</title><author>${escapeXml(song.authors)}</author><copyright>${escapeXml(song.copyright)}</copyright><lyrics>${lyrics}</lyrics></song>`
+        } else {
+          extension = 'txt'; mime = 'text/plain;charset=utf-8'
+          content = `${song.title}\n${song.authors ? `${song.authors}\n` : ''}\n${sectionedLyrics(song)}`
+        }
+      }
+      const blob = new Blob([content], { type: mime })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${songs.length === 1 ? songs[0].title : 'BibleShow-Lyrics'}`.replace(/[^a-z0-9-_ ]/gi, '').trim().replace(/\s+/g, '-') + `.${extension}`
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
+      onClose()
+    } catch (error) { setMessage(String(error)) }
+    finally { setBusy(false) }
+  }
+
+  return <div className="project-change-backdrop lyrics-dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="project-change-dialog song-export-dialog" role="dialog" aria-modal="true" aria-labelledby="song-export-title"><header><h2 id="song-export-title">Export {single ? 'song' : `${songIds.length} songs`}</h2><button type="button" aria-label="Close export dialog" onClick={onClose}>×</button></header><p>Choose a file format. A collection exports as one CSV file.</p><label>File format<select value={format} onChange={(event) => setFormat(event.target.value as typeof format)}><option value="csv">CSV collection</option>{single && <><option value="openlyrics">OpenLyrics XML</option><option value="opensong">OpenSong XML</option><option value="txt">Plain text</option></>}</select></label>{message && <p className="song-dialog-message" role="alert">{message}</p>}<footer><button type="button" onClick={onClose} disabled={busy}>Cancel</button><button type="button" className="save-presentation-button" onClick={() => void exportSelected()} disabled={busy}>{busy ? 'Preparing…' : 'Export file'}</button></footer></section></div>
+}
+
+function MediaSourcePicker({ searchQuery, onPreview, onSendLive, onAdd, previewSourceId }: { searchQuery: string; onPreview: (slide: PresentationSlide) => void; onSendLive: (slide: PresentationSlide) => void; onAdd: (slide: PresentationSlide) => void; previewSourceId: string | null }) {
   const [files, setFiles] = useState<MediaFile[]>([])
   const [mediaFilter, setMediaFilter] = useState<'all' | 'image' | 'video'>('all')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const displayMessage = message || (!isTauri() ? 'Open the desktop app to import and display local media.' : '')
-  const visibleFiles = files.filter((file) => mediaFilter === 'all' || file.mediaType === mediaFilter)
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const visibleFiles = files.filter((file) => (mediaFilter === 'all' || file.mediaType === mediaFilter) && (!normalizedSearch || `${file.filename} ${file.mediaType}`.toLowerCase().includes(normalizedSearch)))
 
   useEffect(() => {
     if (!isTauri()) return
@@ -1380,14 +2456,14 @@ function MediaSourcePicker({ onPreview, onSendLive, onAdd, previewSourceId }: { 
       const slide: PresentationSlide = { sourceId: `media:${file.id}`, title: file.filename, subtitle: file.mediaType === 'video' ? 'Video' : 'Image', body: '', reference: file.filename, kind: file.mediaType, mediaId: file.id, mediaPath: file.localPath, mediaUrl: file.playbackUrl ?? undefined }
       const isPreview = previewSourceId === slide.sourceId
       return <article className={`media-image-card${isPreview ? ' is-preview' : ''}`} key={file.id}>
-        <button className="media-image-preview" aria-label={`Preview ${file.filename}; double-click to send Live`} onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}>{file.mediaType === 'image' ? <img src={convertFileSrc(file.localPath)} alt="" loading="lazy" /> : <LocalVideo src={file.playbackUrl ?? convertFileSrc(file.localPath)} label={file.filename} preload="metadata" />}<span>{file.filename}</span></button>
+              <button className="media-image-preview" draggable onDragStart={(event) => event.dataTransfer.setData('text/bibleshow-slide', JSON.stringify(slide))} aria-label={`Preview ${file.filename}; double-click to send Live`} onClick={() => onPreview(slide)} onDoubleClick={() => onSendLive(slide)}>{file.mediaType === 'image' ? <img src={convertFileSrc(file.localPath)} alt="" loading="lazy" /> : <LocalVideo src={file.playbackUrl ?? convertFileSrc(file.localPath)} label={file.filename} preload="metadata" />}<span>{file.filename}</span></button>
         <button className="media-image-add" onClick={() => onAdd(slide)} aria-label={`Add ${file.filename} to this show`}>＋</button>
       </article>
-    })}{!visibleFiles.length && !busy && <p className="media-library-empty">{files.length ? `No ${mediaFilter === 'image' ? 'images' : 'videos'} are in this library yet.` : 'Import PNG, JPEG, GIF, WebP, MP4 or WebM media files to use them as presentation slides.'}</p>}</div>
+    })}{!visibleFiles.length && !busy && <p className="media-library-empty">{files.length ? normalizedSearch ? 'No media matches this search.' : `No ${mediaFilter === 'image' ? 'images' : 'videos'} are in this library yet.` : 'Import PNG, JPEG, GIF, WebP, MP4 or WebM media files to use them as presentation slides.'}</p>}</div>
   </div>
 }
 
-function LocalVideo({ src, label, sourceId, playback, onPlaybackTime, followPlayback = false, preload = 'metadata' }: { src: string; label: string; sourceId?: string; playback?: VideoPlayback | null; onPlaybackTime?: (currentTime: number, duration: number) => void; followPlayback?: boolean; preload?: 'none' | 'metadata' | 'auto' }) {
+function LocalVideo({ src, label, sourceId, playback, onPlaybackTime, nativeLoop = false, preload = 'metadata' }: { src: string; label: string; sourceId?: string; playback?: VideoPlayback | null; onPlaybackTime?: (currentTime: number, duration: number) => void; nativeLoop?: boolean; preload?: 'none' | 'metadata' | 'auto' }) {
   const [failed, setFailed] = useState(false)
   const [buffering, setBuffering] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -1401,7 +2477,8 @@ function LocalVideo({ src, label, sourceId, playback, onPlaybackTime, followPlay
       const state = playbackRef.current
       if (!video) return
       if (!state || (sourceId && state.sourceId !== sourceId)) { video.pause(); return }
-      video.loop = state.loop
+      // Restart explicitly at the end; some WebViews can stall at a loop boundary.
+      video.loop = nativeLoop && !!state?.loop
       if (video.readyState >= HTMLMediaElement.HAVE_METADATA && Math.abs(video.currentTime - state.currentTime) > 0.35) {
         try { video.currentTime = state.currentTime } catch { /* The browser will sync after metadata loads. */ }
       }
@@ -1416,24 +2493,12 @@ function LocalVideo({ src, label, sourceId, playback, onPlaybackTime, followPlay
         void video.play().catch(() => setFailed(true))
       }
     }
-  }, [playback, sourceId])
+  }, [playback, sourceId, nativeLoop])
 
   useEffect(() => {
     applyPlaybackRef.current()
     return () => { if (playTimer.current !== null) window.clearTimeout(playTimer.current) }
-  }, [src, playback?.sourceId, playback?.commandId])
-
-  useEffect(() => {
-    const video = videoRef.current
-    if (!followPlayback || !video || !playback || playback.sourceId !== sourceId || !playback.isPlaying || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return
-    const anchor = Math.max(playback.updatedAtMs, playback.startAtMs)
-    let expectedTime = playback.currentTime + Math.max(0, Date.now() - anchor) / 1000
-    if (playback.loop && playback.duration > 0) expectedTime %= playback.duration
-    else if (playback.duration > 0) expectedTime = Math.min(expectedTime, playback.duration)
-    if (Math.abs(video.currentTime - expectedTime) > 0.65) {
-      try { video.currentTime = expectedTime } catch { /* The next sync update can retry. */ }
-    }
-  }, [followPlayback, playback, playback?.sourceId, playback?.currentTime, playback?.updatedAtMs, playback?.startAtMs, playback?.isPlaying, playback?.loop, playback?.duration, sourceId])
+  }, [src, playback?.sourceId, playback?.commandId, nativeLoop])
 
   function reportTime(video: HTMLVideoElement) {
     if (onPlaybackTime && playback?.sourceId === sourceId) onPlaybackTime(video.currentTime, Number.isFinite(video.duration) ? video.duration : 0)
@@ -1446,28 +2511,58 @@ function LocalVideo({ src, label, sourceId, playback, onPlaybackTime, followPlay
     if (video) reportTime(video)
   }
 
+  function ended(video: HTMLVideoElement) {
+    const state = playbackRef.current
+    if (!state?.loop || !state.isPlaying || (sourceId && state.sourceId !== sourceId)) {
+      setBuffering(false)
+      reportTime(video)
+      return
+    }
+    video.currentTime = 0
+    reportTime(video)
+    void video.play().then(() => setBuffering(false)).catch(() => { setFailed(true); setBuffering(false) })
+  }
+
   return <div className={`local-video-frame${failed ? ' has-error' : ''}${buffering ? ' is-buffering' : ''}`}>
-    <video ref={videoRef} src={src} aria-label={label} muted playsInline preload={preload} onError={() => { setFailed(true); setBuffering(false) }} onLoadedMetadata={loaded} onCanPlay={() => { setBuffering(false); loaded() }} onWaiting={() => setBuffering(true)} onStalled={() => setBuffering(true)} onPlaying={() => { setBuffering(false); setFailed(false) }} onTimeUpdate={(event) => reportTime(event.currentTarget)} />
+    <video ref={videoRef} src={src} aria-label={label} muted playsInline preload={preload} onError={() => { setFailed(true); setBuffering(false) }} onLoadedMetadata={loaded} onCanPlay={() => { setBuffering(false); loaded() }} onWaiting={() => setBuffering(true)} onStalled={() => setBuffering(true)} onPlaying={() => { setBuffering(false); setFailed(false) }} onEnded={(event) => ended(event.currentTarget)} onTimeUpdate={(event) => reportTime(event.currentTarget)} />
     {buffering && !failed && <span role="status">Buffering video…</span>}
     {failed && <span role="status">This video could not be loaded or decoded by the current desktop webview.</span>}
   </div>
 }
 
-function SlideScreen({ slide, theme, cameraStream, playback, onPlaybackTime, emptyLabel }: { slide: PresentationSlide | null; theme: PresentationTheme; cameraStream: MediaStream | null; playback: VideoPlayback | null; onPlaybackTime: (sourceId: string, currentTime: number, duration: number) => void; emptyLabel: string }) {
+function SlideScreen({ slide, theme, mode, cameraStream, playback, onPlaybackTime, emptyLabel }: { slide: PresentationSlide | null; theme: PresentationTheme; mode: 'preview' | 'live'; cameraStream: MediaStream | null; playback: VideoPlayback | null; onPlaybackTime: (sourceId: string, currentTime: number, duration: number) => void; emptyLabel: string }) {
   if (!slide) return <div className="operator-screen is-empty"><div><Icon name="screen" size={23} /><span>{emptyLabel}</span></div></div>
-  if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /><strong>{slide.reference}</strong></article>
-  if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><LocalVideo src={slide.mediaUrl ?? convertFileSrc(slide.mediaPath)} label={slide.reference} sourceId={slide.sourceId} playback={playback} onPlaybackTime={(currentTime, duration) => onPlaybackTime(slide.sourceId, currentTime, duration)} preload="auto" /><strong>{slide.reference}</strong></article>
+  if (slide.kind === 'image' && slide.mediaPath) return <article className="operator-screen image-screen"><img src={convertFileSrc(slide.mediaPath)} alt={slide.title} /></article>
+  if (slide.kind === 'video' && slide.mediaPath) return <article className="operator-screen video-screen"><LocalVideo src={slide.mediaUrl ?? convertFileSrc(slide.mediaPath)} label={slide.reference} sourceId={slide.sourceId} playback={playback} onPlaybackTime={(currentTime, duration) => onPlaybackTime(slide.sourceId, currentTime, duration)} nativeLoop={mode === 'live'} preload="auto" /></article>
+  if (slide.kind === 'pdf' && slide.mediaPath) return <article className="operator-screen pdf-screen"><PDFPageCanvas localPath={slide.mediaPath} pageNumber={slide.documentPage ?? 1} /></article>
+  if (slide.kind === 'powerpoint') {
+    return <article className="operator-screen powerpoint-screen">{slide.mediaPath && <img src={convertFileSrc(slide.mediaPath)} alt={`${slide.title}, slide ${slide.documentPage ?? 1}`} />}</article>
+  }
   if (slide.kind === 'live' && slide.liveStreamKind === 'camera') return <article className="operator-screen video-screen"><LiveVideo stream={cameraStream} label="Live camera feed" /></article>
   if (slide.kind === 'live' && slide.liveStreamKind === 'youtube' && slide.youtubeVideoId) return <article className="operator-screen video-screen"><iframe src={youtubeEmbedUrl(slide.youtubeVideoId, true)} title="YouTube Live preview" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article>
   if (slide.kind === 'live' && slide.liveStreamUrl) return <article className="operator-screen video-screen">{slide.liveStreamKind === 'mjpeg' ? <img src={slide.liveStreamUrl} alt="Live MJPEG feed" /> : <video src={slide.liveStreamUrl} autoPlay muted playsInline />}</article>
-  return <article className={`operator-screen ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'} presentation-theme-${theme}`}><span>{slide.subtitle}</span><p>{displayBody(slide)}</p><strong>{slide.reference}</strong></article>
+  return <article className={`operator-screen theme-text-slide ${slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`} style={themeStyle(theme)}><ThemeBackground theme={theme} cameraStream={cameraStream} /><span>{slide.subtitle}</span><p>{displayBody(slide)}</p><strong>{slide.reference}</strong></article>
+}
+
+function ThemeBackground({ theme, cameraStream }: { theme: PresentationTheme; cameraStream: MediaStream | null }) {
+  if (theme.kind === 'solid') return null
+  let content: ReactNode = null
+  if (theme.kind === 'media') {
+    const src = theme.playbackUrl ?? convertFileSrc(theme.mediaPath)
+    content = theme.mediaType === 'image' ? <img src={src} alt="" /> : <video src={src} autoPlay muted loop playsInline />
+  } else if (theme.liveStreamKind === 'camera') content = <LiveVideo stream={cameraStream} label="Live camera theme" />
+  else if (theme.liveStreamKind === 'youtube' && theme.youtubeVideoId) content = <iframe src={youtubeEmbedUrl(theme.youtubeVideoId, true)} title="Live video theme" allow="autoplay; encrypted-media; picture-in-picture" />
+  else if (theme.liveStreamUrl) content = theme.liveStreamKind === 'mjpeg' ? <img src={theme.liveStreamUrl} alt="" /> : <video src={theme.liveStreamUrl} autoPlay muted loop playsInline />
+  return <><div className="theme-background-media" aria-hidden="true">{content}</div><div className="theme-background-shade" aria-hidden="true" /></>
 }
 
 export function AudienceWindow() {
-  const [snapshot, setSnapshot] = useState<AudienceSnapshot>({ slide: null, alert: null, videoPlayback: null, theme: 'classic', overlays: [], countdown: { durationSeconds: 300, remainingSeconds: 300, endsAtMs: null, running: false, visible: false } })
+  const [snapshot, setSnapshot] = useState<AudienceSnapshot>({ slide: null, alert: null, videoPlayback: null, theme: defaultTheme, overlays: [], countdown: { durationSeconds: 300, remainingSeconds: 300, endsAtMs: null, running: false, visible: false } })
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const audiencePeer = useRef<RTCPeerConnection | null>(null)
-  const cameraSourceId = snapshot.slide?.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? snapshot.slide.sourceId : null
+  const cameraSourceId = snapshot.slide?.kind === 'live' && snapshot.slide.liveStreamKind === 'camera'
+    ? snapshot.slide.sourceId
+    : snapshot.theme.kind === 'live' && snapshot.theme.liveStreamKind === 'camera' ? snapshot.theme.sourceId : null
 
   useEffect(() => {
     if (!isTauri()) return
@@ -1520,9 +2615,9 @@ export function AudienceWindow() {
   }, [cameraSourceId])
 
   return <main className="audience-window" aria-label="Audience display">
-    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><LocalVideo src={snapshot.slide.mediaUrl ?? convertFileSrc(snapshot.slide.mediaPath)} label={snapshot.slide.reference} sourceId={snapshot.slide.sourceId} playback={snapshot.videoPlayback} followPlayback preload="auto" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'} presentation-theme-${snapshot.theme}`}><span>{snapshot.slide.subtitle}</span><p>{displayBody(snapshot.slide)}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
+    {snapshot.slide ? snapshot.slide.kind === 'image' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><img src={convertFileSrc(snapshot.slide.mediaPath)} alt="" /></article> : snapshot.slide.kind === 'video' && snapshot.slide.mediaPath ? <article className="audience-image-slide"><LocalVideo src={snapshot.slide.mediaUrl ?? convertFileSrc(snapshot.slide.mediaPath)} label={snapshot.slide.reference} sourceId={snapshot.slide.sourceId} playback={snapshot.videoPlayback} nativeLoop preload="auto" /></article> : snapshot.slide.kind === 'pdf' && snapshot.slide.mediaPath ? <article className="audience-pdf-slide"><PDFPageCanvas localPath={snapshot.slide.mediaPath} pageNumber={snapshot.slide.documentPage ?? 1} /></article> : snapshot.slide.kind === 'powerpoint' ? <article className="audience-image-slide">{snapshot.slide.mediaPath && <img src={convertFileSrc(snapshot.slide.mediaPath)} alt="PowerPoint slide" />}</article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'camera' ? <article className="audience-image-slide"><LiveVideo stream={cameraStream} label="Audience camera feed" /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamKind === 'youtube' && snapshot.slide.youtubeVideoId ? <article className="audience-image-slide"><iframe src={youtubeEmbedUrl(snapshot.slide.youtubeVideoId, false)} title="YouTube Live audience output" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen /></article> : snapshot.slide.kind === 'live' && snapshot.slide.liveStreamUrl ? <article className="audience-image-slide">{snapshot.slide.liveStreamKind === 'mjpeg' ? <img src={snapshot.slide.liveStreamUrl} alt="Live stream" /> : <video src={snapshot.slide.liveStreamUrl} autoPlay muted playsInline />}</article> : <article className={`audience-slide theme-text-slide ${snapshot.slide.kind === 'scripture' ? 'scripture-screen' : 'lyrics-screen'}`} style={themeStyle(snapshot.theme)}><ThemeBackground theme={snapshot.theme} cameraStream={cameraStream} /><span>{snapshot.slide.subtitle}</span><p>{displayBody(snapshot.slide)}</p><strong>{snapshot.slide.reference}</strong></article> : <div className="audience-standby" />}
     <OverlayStack overlays={snapshot.overlays} countdown={snapshot.countdown} />
-    {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`}><span>{snapshot.alert.text}</span></div>}
+    {snapshot.alert && <div className={`audience-alert ${snapshot.alert.mode}`} style={messageAlertStyle(snapshot.alert)}><span>{snapshot.alert.text}</span></div>}
   </main>
 }
 

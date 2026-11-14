@@ -323,9 +323,7 @@ fn serve_frames(
                         .unwrap_or("");
                     if first_line.starts_with(&format!("GET {expected_path} HTTP/")) {
                         let _ = client.set_write_timeout(Some(Duration::from_secs(2)));
-                        let _ = client.write_all(format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary={FRAME_BOUNDARY}\r\nCache-Control: no-store, no-cache, must-revalidate\r\nPragma: no-cache\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n"
-                        ).as_bytes());
+                        let _ = client.write_all(frame_stream_headers().as_bytes());
                         let buffer = Arc::clone(&frames);
                         let stop = Arc::clone(&stop);
                         thread::spawn(move || send_multipart_frames(client, buffer, stop));
@@ -340,6 +338,12 @@ fn serve_frames(
             }
         }
     });
+}
+
+fn frame_stream_headers() -> String {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary={FRAME_BOUNDARY}\r\nCache-Control: no-store, no-cache, must-revalidate\r\nPragma: no-cache\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
+    )
 }
 
 fn send_multipart_frames(mut client: TcpStream, frames: Arc<FrameBuffer>, stop: Arc<AtomicBool>) {
@@ -373,5 +377,17 @@ fn send_multipart_frames(mut client: TcpStream, frames: Arc<FrameBuffer>, stop: 
         } else {
             thread::sleep(Duration::from_millis(12));
         }
+    }
+}
+
+#[cfg(test)]
+mod frame_tests {
+    use super::*;
+
+    #[test]
+    fn frame_stream_headers_keep_the_multipart_connection_open() {
+        let headers = frame_stream_headers();
+        assert!(headers.contains("multipart/x-mixed-replace"));
+        assert!(!headers.to_ascii_lowercase().contains("connection: close"));
     }
 }

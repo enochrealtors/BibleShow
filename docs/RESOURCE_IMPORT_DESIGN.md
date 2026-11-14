@@ -9,11 +9,13 @@ BibleShow keeps imported Bible text and lyrics in its local SQLite library. The 
 
 ## Import behavior
 
-- Each batch is parsed before opening a database write transaction. Invalid input leaves the library unchanged.
+- Each submitted batch is parsed before opening a database write transaction. Invalid input leaves that batch unchanged; earlier successful batches remain installed.
 - Bible books and chapters are stored against the selected translation code. Existing Bible queries and persisted Scripture slides carry that code; KJV remains the default.
 - A Bible code, including KJV, can replace the matching installed translation. The replacement is transactional and must contain parseable verses.
 - Lyrics with identical title, authors, and section text are skipped by content fingerprint. Empty lyric files do not create empty song records.
-- Bible imports retain limits of 300 files, 8 MB per text file, and 64 MB per request. Lyrics files import one at a time without application-level file-count or per-file size limits; available memory and storage still apply.
+- Bible imports retain limits of 300 files, 8 MB per text file, and 64 MB per request. Lyrics import reads files incrementally and submits batches of up to 128 files or approximately 6 MB of source text; a serialized batch over 8 MB is split again. There is no overall file-count or per-file size cap; available memory, IPC capacity and storage still apply.
+- Lyrics batches use one database transaction and cached SQL statements. A slow or invalid file stops the remaining batch sequence while preserving completed batches.
+- The Rust profile test parses and persists 5,000 synthetic OpenLyrics files in one batch and reports parsing and database-write durations separately. On the Windows development machine, the passing run took 324 ms to parse and 217 ms to insert into an in-memory SQLite database; this does not include desktop IPC or disk-backed user-library time.
 
 ## Parser limitations
 

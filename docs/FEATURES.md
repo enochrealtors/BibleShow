@@ -1,7 +1,7 @@
 # BIBLESHOW — MASTER FEATURE REGISTER
 
 **Document version:** 1.0
-**Last updated:** 8 November 2026
+**Last updated:** 10 November 2026
 
 New product suggestions and feedback must be appended to [`docs/PROJECT_SUGGESTIONS.md`](PROJECT_SUGGESTIONS.md). When a suggestion is agreed and enters the roadmap, update the relevant feature here and the project guide/status as needed; keep the suggestion entry and its disposition for traceability.
 
@@ -64,8 +64,9 @@ No feature should be marked implemented until it has been tested.
 - [~] Presentation operator interface with distinct Preview and Live screens.
 - [~] Full-window presentation mode, hiding the global sidebar and redundant page/header chrome.
 - [~] Resizable four-area operator layout with larger text and dedicated content-feed scrolling (desktop review pending).
-- [~] Left panel for saved projects and current-show items, including drag/drop from Bible/Lyrics feeds, JSON import/export, and save-before-close prompt.
+- [~] File menu holds New/open/save/delete project, show name and JSON import/export. The full left panel is the current show; Bible, lyrics, media, PDF and PowerPoint items can be dragged in, and show items can be dragged to reorder. Save-before-close prompt remains; desktop interaction review pending.
 - [~] Content-feed tabs for Bible, Lyrics, Videos/Images, Presentations, Live Feed, URL Media, Themes, Functions, and Overlays; Bible, Lyrics, Videos/Images, Presentations, camera capture, browser-playable stream URLs and experimental RTSP are connected.
+- [~] Started PowerPoint decks show a scrollable slide list with per-slide Preview, Send Live and Add actions plus Add all pages to show. Bulk add observes the saved-show 500-slide limit; desktop interaction review remains pending.
 - [~] Capture a connected camera/webcam in the operator window and relay the same feed to the audience window over WebRTC; desktop permission and runtime verification remain.
 - [~] Play direct HTTP(S) video/HLS and MJPEG endpoints when supported by the target WebView; Windows WebView2 and Ubuntu WebKitGTK compatibility remain to be verified.
 - [~] Detect common YouTube watch/live links and display them in YouTube's embedded player; owner embed restrictions and user gesture/autoplay behavior need desktop verification.
@@ -74,13 +75,18 @@ No feature should be marked implemented until it has been tested.
 - [x] Multi-verse passages are staged as one readable verse per slide.
 - [x] Single-click stages Preview; double-click or Enter sends the selected source/sequence item to Live.
 - [x] Lyrics feed shows song sections alongside the song list.
+- [~] One shared search bar follows the active feed; Bible retains Reference/Keyword modes, and lyrics, media, saved projects, and other feeds filter their own content.
+- [~] Bible search results and lyric sections show complete text for selection; song and passage submission stages ordered section/verse slides in Preview and Live.
+- [~] Bible and lyrics imports open in compact icon-triggered dialogs, keeping feed selectors and content visible.
+- [~] Lyrics import uses bounded multi-file batches and reusable database statements; a synthetic 5,000-file profile passed (324 ms parsing; 217 ms in-memory SQLite insertion), while real-library desktop import time still needs confirmation.
 - [~] Videos / Images feed imports PNG, JPEG, GIF and WebP images plus MP4 and WebM videos into the local library, stages them as presentation slides, and supports muted looping playback in Preview and audience output. Linux playback now uses a token-protected loopback HTTP route with byte-range support to work around WebKitGTK asset URL playback failures; confirm behavior in the desktop app.
+- [~] Media slides omit image/video filenames in Preview and Live. Clear media removes only those slides from the current show; library files remain. Explicit end-of-file restart replaces native looping, pending desktop playback verification.
 - [~] Import Bible resources in BibleShow XML, USFM/USX, OSIS and Zefania formats; KJV can be selected by code, and import is available in the Bible feed.
-- [~] Import lyrics in OpenLyrics/OpenSong/OpenLP XML, TXT and CSV formats from the Lyrics feed; files import sequentially with no application-level count or per-file size cap.
+- [~] Import lyrics in OpenLyrics/OpenSong/OpenLP XML, TXT and CSV formats from the Lyrics feed; files import in bounded batches with no overall count or per-file size cap.
 - [~] Presentations feed browses saved local projects and their slides, with controls to Preview, send Live, add one slide, or add the full presentation to the current show.
 - [x] Keyword search results use a dedicated view and clear when a verse is selected.
 - [x] Unsaved project changes prompt to save, discard, or stay before leaving, starting a new show, or opening another project.
-- [~] Right-panel controls for clearing Preview/Live content, closing the local Live monitor, and static/scrolling alerts in that monitor.
+- [~] Right-panel alert controls set bottom/top/middle position, text size/colors, static hold time, and scrolling repeat count or continue-until-cleared. Titled messages are saved and searchable locally. Production build passes; desktop interaction review remains pending.
 - [~] Top toolbar headings for Profile, Edit, View, Settings, Connections, and Plugins; sub-items are placeholders for later design with the user.
 - [~] Edit show slide titles, subtitles, references/attributions, and Scripture/lyric display text; per-show text overrides are stored separately from imported source content. Desktop review pending.
 - [ ] Slide thumbnails.
@@ -88,6 +94,7 @@ No feature should be marked implemented until it has been tested.
 - [~] Separate fullscreen Live audience-output window explicitly targets the selected monitor; external-display runtime verification remains pending.
 - [~] Ubuntu 24.04 x64 trial `.deb` packaging workflow, including GStreamer runtime dependencies; workflow artifact still needs to be built and installed on the user's laptop.
 - [~] Compact "Up Next" preview in the Live monitor for the following service item; Windows desktop layout review pending.
+- [~] Lower feed space increased across every tab by reducing the default Preview/Live height; desktop visual review remains pending.
 - [~] Independent Preview and Live previous/next controls for the temporary sequence.
 - [~] Save, update, load and delete local presentations in SQLite.
 - [~] Import/export presentation project JSON.
@@ -125,11 +132,12 @@ The requested four-area layout, project/show workflow, content feed categories, 
 # 5. MEDIA ENGINE
 
 ## Images
-- [ ] Image import.
+- [x] Image import.
 - [ ] Image library.
 - [ ] Image backgrounds.
 - [ ] Image collections.
 - [ ] Image slide support.
+- [x] Hide image/video source names from Preview and Live output.
 
 ## Audio
 - [ ] Audio import.
@@ -142,11 +150,12 @@ The requested four-area layout, project/show workflow, content feed categories, 
 - [x] Local MP4/WebM import and playback in the Videos / Images feed, Preview, Live and audience output (desktop codec verification pending).
 - [ ] Fullscreen video.
 - [ ] Video backgrounds.
-- [x] Play, pause, seek and loop controls; optional one-second Live start delay and audience playback synchronization (desktop smoothness verification pending).
+- [x] Play, pause, seek and loop controls; Preview uses an explicit loop restart while Live and audience output use native looping and follow operator play/pause/seek commands without periodic time-correction seeks (desktop verification pending).
+- [x] Clear Media removes image/video slides from the current show while keeping imported library files (desktop verification pending).
 
 ## Documents and external media
 - [ ] PDF import.
-- [ ] PowerPoint import.
+- [~] PowerPoint/PPTX library import and external slideshow control, with every slide shown in a scrollable in-app browser and the selected image sent to Preview/Live. The original deck can also open in PowerPoint. Interactive Windows verification remains pending.
 - [ ] Local media folders.
 - [ ] Missing-file detection.
 - [ ] Media relinking.
@@ -154,10 +163,7 @@ The requested four-area layout, project/show workflow, content feed categories, 
 
 # 6. PRESENTATION DESIGN
 
-- [ ] Custom themes.
-- [ ] Background colours.
-- [ ] Background images.
-- [ ] Background videos.
+- [~] Six built-in solid-color themes, custom saved background/text color themes, imported image/video backgrounds, and the connected camera/video stream as a session-only background for Scripture and lyric slides. Applies to Preview, Live and audience output; desktop interaction review remains pending.
 - [ ] Font selection.
 - [ ] Font sizing.
 - [ ] Text alignment.
@@ -200,6 +206,20 @@ The requested four-area layout, project/show workflow, content feed categories, 
 - [ ] Operator override.
 - [ ] Detection history.
 - [ ] Disable automatic display immediately.
+- [~] Approved direction: selectable microphone and processing mode, optional free-tier services, separate direct-reference/paraphrase Live toggles and configurable confidence thresholds. Online paraphrase matching receives transcript text only; any microphone-audio upload needs a separate, clearly disclosed opt-in.
+
+## Bible search suggestions
+- [~] Reference-mode book autocomplete; desktop interaction review pending.
+- [~] Keyword passage suggestions after four words, narrowing as the query becomes more specific; desktop interaction review pending.
+
+## Message alerts
+- [ ] Bottom-positioned alerts with adjustable position, size and color.
+- [ ] Repeat count or until-removed scrolling; configurable static display duration.
+- [ ] Save titled alerts to a searchable reusable library.
+
+## Presentation and workspace organization
+- [ ] PowerPoint slide actions for Preview, Live, adding one slide and adding all slides.
+- [ ] Move project management to File and dedicate the left panel to the draggable current-show list.
 
 # 8. ADVANCED PRESENTATION
 

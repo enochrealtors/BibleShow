@@ -20,7 +20,7 @@ You are continuing development of **BibleShow**, an offline-first church present
 - Stack: Tauri 2, React 19, TypeScript, Vite, and Rust.
 - The default Bible is KJV. Bible lookup belongs in the presentation workflow; there is no separate Bible Study workspace.
 - The app is for church presentation operators and follows useful Preview/Live patterns from tools such as FreeShow and ProPresenter.
-- Keep the resizable four-area operator layout: left saved project/show sequence, centre Preview and Live above the content feed, right display controls, plus the top toolbar.
+- Keep the resizable four-area operator layout: left current-show sequence, centre Preview and Live above the content feed, right display controls, plus the top toolbar. Project creation, open/save, naming and import/export live in the File menu.
 - The content feed tabs are Bible, Lyrics, Videos / Images, Presentations, Live Feed, URL Media, Themes, Functions, and Overlays. Detailed sub-items can evolve as the user gives feedback.
 - Single-select previews an item; double-click or Enter sends it Live. A passage spanning multiple verses becomes one readable verse per slide.
 - Saved shows should not unexpectedly change the Live output when opened. Preserve the existing save/discard/stay prompt for unsaved changes.
@@ -31,13 +31,14 @@ You are continuing development of **BibleShow**, an offline-first church present
 - Bible reference/range and keyword search, including one verse per passage slide.
 - Lyrics sections shown alongside the song list.
 - Four-area operator layout, local Preview/Live monitors, sequence/project save/load/import/export, and separate fullscreen audience output.
+- File menu holds project management; the left panel is dedicated to the draggable, reorderable current show.
 - Local image import (PNG/JPEG/GIF/WebP) and video import (MP4/WebM); initial video playback is muted and loops.
 - Saved Presentations feed can browse projects, Preview or send individual slides Live, add one slide, or add all slides to the current show.
 - SQLite schema is currently version 6.
 
-### Current development stage: RTSP Live Feed reliability and verification
+### Previous Live Feed work — runtime review deferred
 
-The user has chosen RTSP/RTSPS network streams as the current Live Feed priority. The native receiver uses GStreamer with a tokenized loopback MJPEG bridge for Preview and audience output; pipeline errors and end-of-stream now stop that bridge. A Windows compile passed against locally installed GStreamer 1.28.8.1, but real-source playback and portable runtime packaging remain unverified. The next step is a desktop smoke check with a real RTSP source, followed by review of Windows GStreamer packaging. NDI remains a follow-on after its SDK distribution requirements are reviewed.
+The native RTSP/RTSPS receiver uses GStreamer with a tokenized loopback MJPEG bridge for Preview and audience output; pipeline errors and end-of-stream stop that bridge. A Windows compile passed against locally installed GStreamer 1.28.8.1, but real-source playback and portable runtime packaging remain unverified. The user has since explicitly deferred video-loop buffering work while the six ordered product batches are completed. NDI remains a follow-on after its SDK distribution requirements are reviewed.
 
 The Live Feed implementation supports operator-window camera/webcam capture, a WebRTC relay of the same camera to audience output, direct HTTP(S) video/HLS and MJPEG endpoints, YouTube watch/live links via YouTube's embed player, plus the native RTSP/GStreamer receiver. An Ubuntu 24.04 x64 trial installer workflow exists, but the user has deferred packaging and will review the app with `cargo tauri dev` from the source checkout. The code is not yet validated on Windows WebView2 or Ubuntu WebKitGTK. YouTube playback may still be blocked when the owner disables embedding or the web player requires a user click.
 
@@ -65,5 +66,19 @@ Keep direct camera and browser-playable HTTP(S) endpoints as the no-GStreamer de
 ### Current Git handoff
 
 Check the current branch, status, remotes, local commits and remote state; do not assume new work has been pushed. At the start of the camera/URL implementation session, `main` was one commit ahead of `origin/main` at local commit `1aab387` (`feat: add RTSP network live feed`), and `docs/LIVE_FEED_DESIGN.md` already contained an uncommitted user-approved direction update. Preserve those facts and any additional worktree edits.
+
+### Current task — verify PowerPoint and media output fixes
+
+The user authorized four changes before automatic Bible speech detection: embed externally running PowerPoint in BibleShow Preview/Live while BibleShow navigates; restart videos cleanly at the end; hide image/video names in Preview/Live; and clear image/video slides from the current show without deleting imported files. User choices and all implementation/validation notes are in S-005 of `docs/PROJECT_SUGGESTIONS.md` and session 21 of `docs/DEVELOPMENT_STATUS.md`.
+
+The presentation feed now prepares a PNG for each PowerPoint slide, displays the slides in a scrollable in-app list, and uses the chosen slide image in Preview and Live. A compact Start control prepares the deck and starts a windowed PowerPoint show; Open in PowerPoint opens the original file separately. BibleShow still navigates the external show when sending a slide Live. This replaces the unreliable captured-window path. TypeScript app/node checks, the Vite production build and Rust library tests have passed (9 passed, 0 failed, 1 ignored); `git diff --check` is clean. I attempted the ignored PowerPoint test, but Office COM failed before creating a test deck with HRESULT 0x80070520 because the background agent session has no logon session. The user closed the app, so runtime behavior is unverified. Leave video buffering unchanged for now, as requested.
+
+After the in-app presentation browser is verified, do S-007 next: built-in themes with configurable background/text colors and imported image/video themes. S-006 speech detection follows later. Preserve its approved controls: microphone selection; local and optional online processing; assisted review and auto-Live toggles; separately configurable direct-reference and paraphrase thresholds; transcript-only online paraphrase matching; and a separate, clearly disclosed, off-by-default consent before any microphone audio is sent online. Prefer a current free/free-tier service, with pricing and data handling disclosed. Keep auto-Live disabled by default and provide an immediate stop/override.
+
+The current branch is `main`, two commits ahead of `origin/main`; this working tree also contains uncommitted implementation and documentation edits, including `src-tauri/src/powerpoint.rs`. Preserve all of them. The user's coding preference is to use concise, focused patches and avoid broad rewrites when a few clear lines solve the task safely. Do not commit or push; the user wants to confirm the app first.
+
+### User's ordered work queue — 13 November 2026
+
+This newer user instruction supersedes older feature ordering: (1) shared lower-feed spacing, (2) Bible book/keyword autocomplete, (3) Themes including solid colors, imported image/video, custom design and live camera/video backgrounds, (4) timed/styled reusable message alerts, (5) PowerPoint slide Preview/Live/Add/Add all actions, and (6) move project management into File and dedicate the left panel to the current show. All six batches now have implementation and production-build checks in sessions 25–30. Desktop interaction review remains pending because Windows UI automation timed out. Preserve all existing changes and do not commit or push.
 
 ---

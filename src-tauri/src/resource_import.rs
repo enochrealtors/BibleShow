@@ -333,12 +333,16 @@ fn append_verse_text(book: &mut BookBuilder, chapter: i64, verse: i64, value: &s
 fn xml_text(node: Node<'_, '_>) -> String {
     fn visit(node: Node<'_, '_>, output: &mut String) {
         if node.is_text() { output.push_str(node.text().unwrap_or("")); return; }
-        if node.is_element() && ["note", "reference", "title", "milestone"].iter().any(|tag| node.has_tag_name(*tag)) { return; }
+        if node.is_element() && ["note", "reference", "title", "milestone"].iter().any(|tag| tag_is(node, tag)) { return; }
         for child in node.children() { visit(child, output); }
     }
     let mut output = String::new();
     visit(node, &mut output);
     output.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn tag_is(node: Node<'_, '_>, name: &str) -> bool {
+    node.is_element() && node.tag_name().name() == name
 }
 
 pub fn parse_lyrics_files(files: &[(String, String)], default_category: &str) -> Result<Vec<ParsedSong>, String> {
@@ -362,34 +366,33 @@ pub fn parse_lyrics_files(files: &[(String, String)], default_category: &str) ->
 fn parse_song_xml(source: &str, default_category: &str) -> Result<ParsedSong, String> {
     let doc = Document::parse(source).map_err(|_| "The selected lyrics XML is malformed.".to_string())?;
     let root = doc.root_element();
-    if root.tag_name().name() != "song" { return Err("The XML is not an OpenLyrics or OpenSong song.".into()); }
-    if let Some(properties) = root.children().find(|node| node.has_tag_name("properties")) {
+    if !tag_is(root, "song") { return Err("The XML is not an OpenLyrics or OpenSong song.".into()); }
+    if let Some(properties) = root.children().find(|node| tag_is(*node, "properties")) {
         let collect = |container: &str, item: &str| -> Vec<String> {
-            properties.descendants().filter(|node| node.has_tag_name(item) && node.parent().is_some_and(|parent| parent.has_tag_name(container)))
+            properties.descendants().filter(|node| tag_is(*node, item) && node.parent().is_some_and(|parent| tag_is(parent, container)))
                 .filter_map(|node| node.text()).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string).collect()
         };
         let title = collect("titles", "title").into_iter().next().ok_or("An OpenLyrics song has no title.")?;
         let authors = collect("authors", "author").join("; ");
-        let copyright = properties.descendants().find(|node| node.has_tag_name("copyright")).and_then(|node| node.text()).unwrap_or("").trim().to_string();
+        let copyright = properties.descendants().find(|node| tag_is(*node, "copyright")).and_then(|node| node.text()).unwrap_or("").trim().to_string();
         let themes = collect("themes", "theme");
-        let lyrics = root.children().find(|node| node.has_tag_name("lyrics")).ok_or("An OpenLyrics song has no lyrics section.")?;
-        let sections = lyrics.children().filter(|node| node.has_tag_name("verse")).filter_map(|verse| {
-            let name = verse.attribute("name").unwrap_or("section");
-            let lines = verse.children().find(|node| node.has_tag_name("lines"))?;
-            let mut content = String::new(); collect_lines(lines, &mut content);
-            let content = content.trim().to_string();
-            (!content.is_empty()).then(|| (section_type(name).to_string(), name.to_string(), content))
-        }).collect::<Vec<_>>();
-        if sections.is_empty() { return Err("The OpenLyrics song contains no lyric sections.".into()); }
+        let sections = root.children().find(|node| tag_is(*node, "lyrics")).map(|lyrics| {
+            lyrics.children().filter(|node| tag_is(*node, "verse")).filter_map(|verse| {
+                let name = verse.attribute("name").unwrap_or("section");
+                let lines = verse.children().find(|node| tag_is(*node, "lines"))?;
+                let mut content = String::new(); collect_lines(lines, &mut content);
+                let content = content.trim().to_string();
+                (!content.is_empty()).then(|| (section_type(name).to_string(), name.to_string(), content))
+            }).collect::<Vec<_>>()
+        }).unwrap_or_default();
         Ok(ParsedSong { title, authors, copyright, themes, category: default_category.into(), sections })
     } else {
-        let child_text = |name: &str| root.children().find(|node| node.has_tag_name(name)).and_then(|node| node.text()).unwrap_or("").trim().to_string();
+        let child_text = |name: &str| root.children().find(|node| tag_is(*node, name)).and_then(|node| node.text()).unwrap_or("").trim().to_string();
         let title = child_text("title");
         if title.is_empty() { return Err("An OpenSong file has no title.".into()); }
         let lyrics = child_text("lyrics");
         let sections = split_sections(&lyrics);
-        if sections.is_empty() { return Err("The OpenSong file contains no lyrics.".into()); }
-        let themes = root.children().filter(|node| node.has_tag_name("theme") || node.has_tag_name("alttheme")).filter_map(|node| node.text()).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string).collect();
+        let themes = root.children().filter(|node| tag_is(*node, "theme") || tag_is(*node, "alttheme")).filter_map(|node| node.text()).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string).collect();
         Ok(ParsedSong { title, authors: child_text("author"), copyright: child_text("copyright"), themes, category: default_category.into(), sections })
     }
 }
@@ -397,8 +400,8 @@ fn parse_song_xml(source: &str, default_category: &str) -> Result<ParsedSong, St
 fn collect_lines(node: Node<'_, '_>, output: &mut String) {
     for child in node.children() {
         if child.is_text() { output.push_str(child.text().unwrap_or("")); }
-        else if child.is_element() && child.has_tag_name("br") { output.push('\n'); }
-        else if child.is_element() && !child.has_tag_name("comment") { collect_lines(child, output); }
+        else if child.is_element() && tag_is(child, "br") { output.push('\n'); }
+        else if child.is_element() && !tag_is(child, "comment") { collect_lines(child, output); }
     }
 }
 
@@ -468,7 +471,7 @@ fn parse_csv_songs(source: &str, default_category: &str) -> Result<Vec<ParsedSon
         let get = |index: Option<usize>| index.and_then(|index| row.get(index)).map(|value| value.trim()).unwrap_or("");
         let title = get(Some(title_col));
         let lyrics = get(Some(lyrics_col));
-        if title.is_empty() || lyrics.trim().is_empty() { continue; }
+        if title.is_empty() { continue; }
         let category = match get(col(&["category", "type"])).to_ascii_lowercase().as_str() { "hymn" => "hymn", "song" => "song", "" => default_category, other => return Err(format!("Unknown CSV category: {other}")) };
         let themes = get(col(&["themes", "theme", "tags"])).split([';', ',']).map(str::trim).filter(|theme| !theme.is_empty()).map(str::to_string).collect();
         songs.push(ParsedSong {
@@ -476,7 +479,7 @@ fn parse_csv_songs(source: &str, default_category: &str) -> Result<Vec<ParsedSon
             copyright: get(col(&["copyright", "license"])).into(), themes, category: category.into(), sections: split_sections(lyrics),
         });
     }
-    if songs.is_empty() { return Err("CSV contains no rows with both a title and lyrics.".into()); }
+    if songs.is_empty() { return Err("CSV contains no rows with a title.".into()); }
     Ok(songs)
 }
 
@@ -496,5 +499,32 @@ fn parse_csv(source: &str) -> Result<Vec<Vec<String>>, String> {
     if quoted { return Err("CSV has an unclosed quoted field.".into()); }
     if !field.is_empty() || !row.is_empty() { row.push(field); rows.push(row); }
     Ok(rows)
+}
+
+#[cfg(test)]
+mod lyrics_empty_content_tests {
+    use super::*;
+
+    #[test]
+    fn empty_openlyrics_and_opensong_entries_do_not_abort_valid_imports() {
+        let files = vec![
+            ("valid.xml".into(), "<song xmlns=\"http://openlyrics.info/namespace/2009/song\"><properties><titles><title>Valid</title></titles></properties><lyrics><verse name=\"v1\"><lines>First verse</lines></verse></lyrics></song>".into()),
+            ("empty.xml".into(), "<song xmlns=\"http://openlyrics.info/namespace/2009/song\"><properties><titles><title>Empty XML</title></titles></properties><lyrics/></song>".into()),
+            ("empty.ost".into(), "<song><title>Empty OpenSong</title><lyrics/></song>".into()),
+            ("title-only.xml".into(), "<song><properties><titles><title>Title only</title></titles></properties></song>".into()),
+        ];
+        let songs = parse_lyrics_files(&files, "song").unwrap();
+        assert_eq!(songs.len(), 4);
+        assert_eq!(songs[0].sections.len(), 1);
+        assert!(songs[1..].iter().all(|song| song.sections.is_empty()));
+    }
+
+    #[test]
+    fn csv_title_only_rows_are_kept_for_the_importer_to_skip() {
+        let songs = parse_csv_songs("title,lyrics\nA valid song,\"[Verse 1]\nFirst line\"\nAn empty title entry,\n", "song").unwrap();
+        assert_eq!(songs.len(), 2);
+        assert_eq!(songs[0].sections.len(), 1);
+        assert!(songs[1].sections.is_empty());
+    }
 }
 
