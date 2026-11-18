@@ -27,3 +27,9 @@ src-tauri/resources/speech-models/tiny.en-tokens.txt
 *.njsproj
 *.sln
 *.sw?
+
+# Locally built installers
+/release/
+
+# Locally built installers
+/release/

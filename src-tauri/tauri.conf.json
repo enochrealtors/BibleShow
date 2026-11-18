@@ -24,6 +24,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "useLocalToolsDir": true,
     "resources": {
       "resources/speech-models/*": "speech-models/"
     },
