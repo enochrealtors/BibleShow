@@ -1,8 +1,8 @@
 # BIBLESHOW — DATABASE DESIGN
 
-**Document version:** 1.1
-**Last updated:** 3 November 2026
-**Status:** Local KJV/song schema, saved presentations, image and video libraries, and per-slide presentation text overrides implemented; SQLite schema version 6.
+**Document version:** 1.2
+**Last updated:** 14 November 2026
+**Status:** Local Bible/song schema, saved presentations, image and video libraries, per-slide text overrides, PDF and PowerPoint slides implemented; SQLite schema version 8. A rebuildable local FTS5 verse index is created on first quotation search.
 
 ---
 
@@ -406,6 +406,11 @@ Scripture slides should store a book code, chapter, verse range, versification i
 - Version 6 adds nullable `presentation_items.body_override` for custom text on an individual Scripture or lyric slide.
 - The Bible/lyrics source tables remain unchanged. Loading a saved project uses the override when present and otherwise hydrates the original local source text.
 - Older version-5 libraries are upgraded in a transaction when opened or when a Bible package import initializes the local schema.
+
+### Implemented schema versions 7–8 and local search index
+
+- Version 7 adds PDF presentation files and page references; version 8 adds PowerPoint slides to saved presentations.
+- The quotation matcher creates a rebuildable FTS5 index on first use and maintains it with SQLite triggers as Bible verses are inserted, updated or deleted. The search index is derived data; Bible verse rows remain the source of truth.
 
 ## 17. Design Decisions Still Open
 

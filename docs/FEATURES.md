@@ -1,7 +1,7 @@
 # BIBLESHOW — MASTER FEATURE REGISTER
 
 **Document version:** 1.0
-**Last updated:** 10 November 2026
+**Last updated:** 18 November 2026
 
 New product suggestions and feedback must be appended to [`docs/PROJECT_SUGGESTIONS.md`](PROJECT_SUGGESTIONS.md). When a suggestion is agreed and enters the roadmap, update the relevant feature here and the project guide/status as needed; keep the suggestion entry and its disposition for traceability.
 
@@ -176,37 +176,37 @@ The requested four-area layout, project/show workflow, content feed categories, 
 # 7. INTELLIGENT SCRIPTURE DETECTION
 
 ## Speech recognition
-- [ ] Microphone selection.
-- [ ] Speech transcription.
-- [ ] Live transcription.
-- [ ] Transcription controls.
-- [ ] Offline recognition evaluation.
+- [~] Microphone selection and native input capture (CPAL path and full Windows native build pass; interactive microphone verification pending).
+- [~] Streaming interim/final speech transcription (sherpa-onnx Zipformer model is downloaded and configured as a Tauri resource; UI/runtime and installer verification pending).
+- [~] Sherpa streaming ASR with an optional multilingual Whisper final-pass mode; combined mode is the default, while fast streaming-only mode remains selectable. Vosk and representative accent evaluation remain pending.
+- [~] Start/Stop microphone control; audio remains local and is not saved.
+- [ ] Offline recognition evaluation on representative sermon audio.
 
 ## Direct reference detection
-- [ ] Detect book names.
-- [ ] Detect chapter references.
-- [ ] Detect verse references.
-- [ ] Handle spoken reference variations.
-- [ ] Validate Bible references.
+- [~] Parse explicit book/chapter/verse references from transcript text and validate requested verses against the installed local translation.
+- [~] Return multiple distinct references and verse ranges as ordered Bible slide candidates.
+- [~] Detect references from live interim and finalized microphone speech; constrain fuzzy book-name recovery by a parseable chapter/verse and validate verses against the installed Bible. Interactive microphone verification remains pending.
+- [~] Parse common spoken reference forms such as “John chapter three verse sixteen” and “Romans eight twenty-eight”.
+- [ ] Validate detection confidence against speech recognition errors.
 
 ## Intelligent matching
-- [ ] Exact quotation matching.
-- [ ] Paraphrase detection.
+- [~] Match transcript wording against local Bible verses with SQLite FTS5 candidate retrieval and RapidFuzz-assisted lexical ranking; review-only, not calibrated confidence.
+- [ ] Offline paraphrase detection using the planned MiniLM/ONNX model.
 - [ ] Contextual Scripture matching.
 - [ ] Candidate ranking.
 - [ ] Confidence scoring.
 - [ ] Translation-aware matching.
 
 ## Operator controls
-- [ ] Assisted detection mode.
-- [ ] Candidate Scripture list.
-- [ ] Operator confirmation.
-- [ ] Automatic detection mode.
+- [~] Live reference and wording detection automatically stage finalized candidates in Preview; direct-reference Auto-Live is an explicit opt-in.
+- [~] Review detected reference candidates and queue all verses for operator selection.
+- [~] Explicitly send a selected detected passage through the existing Live presentation path.
+- [~] Automatic direct-reference and lexical wording detection; semantic paraphrase matching is still pending.
 - [ ] Configurable confidence thresholds.
 - [ ] Operator override.
 - [ ] Detection history.
 - [ ] Disable automatic display immediately.
-- [~] Approved direction: selectable microphone and processing mode, optional free-tier services, separate direct-reference/paraphrase Live toggles and configurable confidence thresholds. Online paraphrase matching receives transcript text only; any microphone-audio upload needs a separate, clearly disclosed opt-in.
+- [~] Current approved direction: keep transcription and matching fully offline; provide selectable local ASR engines and optional fusion, separate direct-reference/paraphrase controls and configurable thresholds. Keep Auto-Live disabled until confidence is calibrated with representative sermon audio. No audio or transcript is sent to online services.
 
 ## Bible search suggestions
 - [~] Reference-mode book autocomplete; desktop interaction review pending.

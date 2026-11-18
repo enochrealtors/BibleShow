@@ -52,8 +52,8 @@ For each new item, record a short title, the user's intent, the relevant project
 - **Added:** 11 November 2026
 - **Request:** Listen to a selected microphone and detect explicit Bible references or paraphrased Scripture. Support assisted review and configurable automatic Live display, with direct references and paraphrases controlled separately by user-set confidence thresholds.
 - **Area / stage:** Intelligent Scripture Detection.
-- **Status:** Planned.
-- **Plan / notes:** The user prefers free or free-tier services and approved selectable microphone, processing and Live-approval options. Keep local processing available; send transcript text only for optional online paraphrase matching. Any online speech transcription that transmits microphone audio must have a separate, clear, off-by-default user opt-in. The user moved Themes ahead of this work; schedule speech detection after S-007.
+- **Status:** In development.
+- **Plan / notes:** Live microphone speech is checked against local direct-reference parsing and FTS5/RapidFuzz wording matches. Interim Sherpa text is refined by a bundled multilingual Whisper Tiny final pass in combined mode; a streaming-only mode remains selectable. Audio is kept in memory only. Direct-reference Auto-Live requires an explicit toggle; wording scores remain review-only. MiniLM semantic paraphrase matching, confidence calibration, accented sermon evaluation, Vosk comparison and Windows/Ubuntu installer verification remain pending.
 
 ### S-007 — Add built-in, imported and live-feed presentation themes
 

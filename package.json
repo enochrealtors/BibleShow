@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "prepare:speech-model": "node scripts/prepare-speech-model.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

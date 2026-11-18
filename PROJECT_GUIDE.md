@@ -232,24 +232,23 @@ Automatic display must never be enabled by default without clear user consent.
 
 ## 3.6 Detection technology
 
-Potential technologies include:
+Current offline detection direction:
 
-- Whisper for speech recognition.
-- Semantic search for meaning-based Scripture matching.
-- Text embeddings.
-- Vector search.
-- PostgreSQL with pgvector for cloud-based semantic search.
-- Local alternatives for offline operation.
+- sherpa-onnx streaming Zipformer provides live hypotheses; combined mode compares its final transcript with Whisper Tiny. English mode uses the Tiny.en export; automatic language detection uses multilingual Tiny. Keep model hypotheses available to Bible matching instead of discarding the streaming transcript.
+- SQLite FTS5 with RapidFuzz-assisted ranking for quotation candidates.
+- all-MiniLM-L6-v2 sentence embeddings through ONNX Runtime for paraphrase matching (planned, not implemented).
+- Explicit reference parsing, lexical matching and semantic matches contribute complementary evidence; confidence requires calibration before automatic routing.
+- PostgreSQL/pgvector may support a separate optional cloud-search feature, but is not part of offline speech detection.
 
 The detection engine must be modular so that speech recognition and semantic search providers can be replaced without rebuilding the entire application.
 
-Online AI services must remain optional. Do not assume they will be permanently free.
+The Bible speech-detection pipeline must work entirely offline. Do not send microphone audio or transcripts to online services.
 
 ### Approved operating controls
 
-- Let the operator choose a microphone, local or optional online processing, assisted review or automatic Live behavior, and separate percentage thresholds for direct references and paraphrases.
+- Let the operator choose a microphone and local recognition engine(s), assisted review or optional automatic Live behavior, and separate percentage thresholds for direct references and paraphrases.
 - A recognized direct reference may go Live immediately only when that option is enabled. Paraphrase matches must meet the operator's configured threshold; lower-scoring candidates stay in the review list.
-- Prefer free or free-tier services, but disclose that pricing and free tiers can change. Optional online paraphrase matching sends transcript text only. Any service that sends microphone audio must be a separate, clearly disclosed, off-by-default choice. Keep provider credentials in memory unless the user separately approves secure persistence.
+- Keep transcription and passage matching local, with no service credentials, subscription or internet requirement.
 - Keep a one-action stop/disable control and an immediate operator override visible while detection is active.
 
 ---
@@ -268,8 +267,8 @@ The agreed initial technology stack is:
 | Local database | SQLite | Offline data storage |
 | Cloud backend | Supabase | Authentication and synchronisation |
 | Cloud database | PostgreSQL | Cloud data |
-| Semantic search | pgvector | Meaning-based Scripture search |
-| Speech recognition | Whisper | Speech transcription |
+| Local semantic matching | all-MiniLM-L6-v2 + ONNX Runtime (planned) | Offline paraphrase matching |
+| Speech recognition | sherpa-onnx streaming + optional Whisper final pass; evaluate Vosk | Local speech transcription |
 | Version control | Git/GitHub | Source control and collaboration |
 
 ## 4.1 Architecture principles
@@ -693,17 +692,18 @@ These are the versions recorded during initial setup, not permanent requirements
 - Fully verified presentation selection, project workflow, slide editing, the evolving four-area operator layout, and separate audience output.
 - Media feeds and playback for video, images, URLs and live inputs.
 - Display controls and message alerts.
-- Scripture detection.
+- MiniLM/ONNX paraphrase matching, calibrated confidence and automatic routing controls.
+- Interactive microphone verification, sermon-audio evaluation, and self-contained Windows/Ubuntu installers for offline detection.
 - Optional Supabase integration and cloud synchronisation.
 - Windows installer and release validation.
 
 ## Immediate next development objectives
 
-1. Verify the full-window layout, larger typography, feed scrolling, resizers, project import/export, save-before-close, display controls and alerts in the desktop app.
-2. Verify Bible keyword result selection, the unsaved-show prompt, project management and fullscreen audience output in the Tauri desktop app.
-3. Verify the optimized MP4/WebM upload path, codec errors, Preview/Live and saved local media slides in the Tauri desktop app.
-4. Define remaining content-feed and toolbar sub-items with the user before implementing each.
-5. Verify local presentation save/load/delete at runtime.
+1. Verify microphone selection, streaming/Whisper final results, Stop/restart and Preview/Live routing in the Windows app.
+2. Implement local MiniLM/ONNX semantic paraphrase matching alongside explicit references and FTS5/RapidFuzz.
+3. Calibrate confidence and review/Live thresholds on representative accented sermon audio; keep paraphrase Auto-Live disabled until false-trigger behavior is acceptable.
+4. Evaluate Vosk and compare latency, accuracy, CPU and memory before changing the selectable ASR modes.
+5. Build and verify self-contained offline installers for Windows and Ubuntu.
 
 These objectives are ordered working guidance. New user suggestions may change their order or add new stages; update this guide and the feature register as the design evolves.
 
@@ -720,8 +720,8 @@ They must be researched and agreed when the relevant phase begins.
 - Initial Bible translations and their licences.
 - Exact Bible database schema.
 - Final desktop interface design.
-- Local speech recognition implementation.
-- Offline semantic search technology.
+- Final default ASR mode after comparative accuracy and performance benchmarks.
+- Final confidence calibration and Auto-Live routing thresholds.
 - Supported PowerPoint and PDF import methods.
 - Windows packaging and update mechanism.
 - Optional cloud hosting and associated costs.

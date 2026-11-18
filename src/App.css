@@ -541,6 +541,17 @@ h1, h2, p { margin-top: 0; }
 .display-actions > button.save-presentation-button { border-color: #57735f; color: #fff; background: #48634f; }
 .display-actions > button:disabled { opacity: .45; cursor: default; }
 .display-control-group textarea { resize: vertical; line-height: 1.5; }
+.bible-detection-panel > summary { color: var(--text-strong); cursor: pointer; font-size: 8px; font-weight: 700; }
+.bible-detection-panel > small { overflow-wrap: anywhere; }
+.speech-detection-panel > summary { color: var(--text-strong); cursor: pointer; font-size: 8px; font-weight: 700; }
+.speech-detection-panel > small { overflow-wrap: anywhere; }
+.speech-detection-panel .speech-detection-toggle { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; }
+.speech-detection-panel .speech-detection-toggle input { width: 14px; height: 14px; flex: 0 0 auto; margin: 0; accent-color: #58745e; }
+.speech-interim { overflow-wrap: anywhere; margin: 0; padding: 7px; border-radius: 4px; color: var(--text-muted); background: var(--surface-soft); font-size: 8px; line-height: 1.4; }
+.bible-detection-result { display: grid; gap: 5px; padding: 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); }
+.bible-detection-result > strong { color: var(--text-strong); font-size: 8px; }
+.bible-detection-result > small { display: -webkit-box; overflow: hidden; color: var(--text-muted); font-size: 8px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.bible-detection-result .display-actions > button { font-size: 7px; }
 .display-control-group input:not([type="color"]):not([type="range"]):not([type="checkbox"]) { width: 100%; min-width: 0; box-sizing: border-box; min-height: 28px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; color: var(--text-strong); background: var(--surface-soft); font: inherit; font-size: 8px; text-transform: none; }
 .display-control-group input[type="range"] { width: 100%; accent-color: #58745e; }
 .display-control-group input[type="color"] { width: 36px; height: 27px; padding: 2px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }

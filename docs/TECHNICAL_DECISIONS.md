@@ -97,20 +97,22 @@ Intended uses:
 
 ## 8. Semantic Search
 
-**Decision:** PostgreSQL with pgvector for cloud semantic search.  
-**Status:** AGREED IN PRINCIPLE — IMPLEMENTATION PENDING
+**Decision for Bible auto-detection:** Use the all-MiniLM-L6-v2 sentence embedding model through ONNX Runtime locally, with Bible candidates sourced from SQLite.
+**Status:** APPROVED FOR IMPLEMENTATION — NOT YET IMPLEMENTED
 
 Purpose:
-- Meaning-based Scripture search.
-- Paraphrase matching.
-- Contextual Scripture suggestions.
+- Match paraphrases by meaning rather than exact wording.
+- Keep all detection usable offline with no external API, subscription or required network connection.
+- Combine semantic candidates with explicit-reference parsing and FTS5/RapidFuzz results; calibrate the final confidence using representative sermon speech before any automatic Live routing.
 
-A suitable local/offline alternative must also be evaluated.
+PostgreSQL/pgvector remains a possible future cloud-search technology and is not part of offline speech detection.
 
 ## 9. Speech Recognition
 
-**Preferred technology:** Whisper  
-**Status:** SELECTED AS PREFERRED OPTION — IMPLEMENTATION PENDING
+**Current implementation:** sherpa-onnx streaming Zipformer with an optional bundled Whisper Tiny multilingual final pass and CPAL microphone capture.
+**Status:** IMPLEMENTED; Windows native type-check and frontend build pass, interactive microphone and accent evaluation pending.
+
+The user wants local ASR engines to be independently selectable, with optional fusion. Combined streaming plus Whisper final-pass mode is selectable alongside streaming-only mode; Vosk remains unevaluated. The streaming model proposes live text while Whisper refines finalized phrases. Keep audio in memory only and unsaved. Do not treat model confidence or similarity as calibrated accuracy.
 
 Purpose:
 - Transcribe live speech.

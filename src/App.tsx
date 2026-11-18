@@ -43,6 +43,7 @@ type BookSummary = { book_number: number; name: string; chapter_count: number }
 type TranslationSummary = { id: string; name: string; language: string }
 type ChapterData = { book_number: number; name: string; chapter_number: number; chapter_count: number; verses: { verse_number: number; text: string }[] }
 type BibleSearchResult = { book_number: number; book_name: string; chapter_number: number; verse_number: number; text: string }
+type DetectedBibleReference = { reference: string; translationId: string; bookNumber: number; bookName: string; chapterNumber: number; detectionMethod?: 'reference' | 'quotation'; matchScore?: number | null; verses: { verse_number: number; text: string }[] }
 type SongSummary = { id: string; title: string; authors: string; category: 'hymn' | 'song' }
 type SongDetail = SongSummary & { copyright: string; themes: string[]; sections: { section_type: string; label: string; lyrics: string }[] }
 type PresentationSlide = { sourceId: string; title: string; subtitle: string; body: string; bodyOverride?: string | null; reference: string; kind: 'scripture' | 'lyrics' | 'image' | 'video' | 'pdf' | 'powerpoint' | 'live'; bookNumber?: number; chapterNumber?: number; verseNumber?: number; translationId?: string; songId?: string; sectionIndex?: number; mediaId?: string; presentationFileId?: string; documentPage?: number; pageCount?: number; mediaPath?: string; mediaUrl?: string; liveStreamUrl?: string; youtubeVideoId?: string; liveStreamKind?: 'camera' | 'video' | 'mjpeg' | 'youtube' }
@@ -74,7 +75,28 @@ type PresentationFile = { id: string; filename: string; fileType: 'pdf' | 'ppt' 
 type PowerPointSession = { fileId: string; slideCount: number; slideThumbnails: string[] }
 type SavedPresentation = { id: number; title: string; slides: PresentationSlide[] }
 type LiveFeedInfo = { streamId: string; streamUrl: string }
+type AudioInput = { index: number; name: string; is_default: boolean }
+type SpeechTranscriptEvent = { text: string; final_segment: boolean; authoritative: boolean; engine: string; alternatives: string[] }
+type SpeechStatusEvent = { status: 'listening' | 'stopped' | 'error'; message: string | null }
+type DetectionRequest = { transcript: string; alternatives?: string[]; origin: 'manual' | 'microphone'; finalSegment: boolean }
+type BibleDetectionSettings = { detectWhileListening: boolean; directReferencesToLive: boolean; paraphrasesToLive: boolean; reviewThreshold: number; liveThreshold: number; speechEngine: 'streaming' | 'combined'; whisperLanguage: 'en' | 'auto' }
 type CameraSignal = { sourceId: string; sender?: 'operator' | 'audience'; description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }
+
+function loadBibleDetectionSettings(): BibleDetectionSettings {
+  const defaults: BibleDetectionSettings = { detectWhileListening: true, directReferencesToLive: false, paraphrasesToLive: false, reviewThreshold: 70, liveThreshold: 90, speechEngine: 'combined', whisperLanguage: 'en' }
+  try {
+    const saved = JSON.parse(localStorage.getItem('bibleshow-bible-detection-settings') ?? 'null') as Partial<BibleDetectionSettings> | null
+    return saved ? {
+      detectWhileListening: typeof saved.detectWhileListening === 'boolean' ? saved.detectWhileListening : defaults.detectWhileListening,
+      directReferencesToLive: typeof saved.directReferencesToLive === 'boolean' ? saved.directReferencesToLive : defaults.directReferencesToLive,
+      paraphrasesToLive: false,
+      reviewThreshold: Number.isFinite(saved.reviewThreshold) ? Math.max(50, Math.min(95, saved.reviewThreshold!)) : defaults.reviewThreshold,
+      liveThreshold: Number.isFinite(saved.liveThreshold) ? Math.max(70, Math.min(100, saved.liveThreshold!)) : defaults.liveThreshold,
+      speechEngine: saved.speechEngine === 'streaming' ? 'streaming' : defaults.speechEngine,
+      whisperLanguage: saved.whisperLanguage === 'auto' ? 'auto' : defaults.whisperLanguage,
+    } : defaults
+  } catch { return defaults }
+}
 
 function extractYoutubeVideoId(value: string) {
   try {
@@ -501,6 +523,25 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
   const audienceOutputDismissed = useRef(false)
   const audienceDisplayTarget = useRef<string | null>(null)
   const displayRefreshInFlight = useRef(false)
+  const [detectionTranscript, setDetectionTranscript] = useState('')
+  const [detectedReferences, setDetectedReferences] = useState<DetectedBibleReference[]>([])
+  const [detectionMessage, setDetectionMessage] = useState('')
+  const [detectionBusy, setDetectionBusy] = useState(false)
+  const [audioInputs, setAudioInputs] = useState<AudioInput[]>([])
+  const [selectedAudioInput, setSelectedAudioInput] = useState('')
+  const [speechStatus, setSpeechStatus] = useState<SpeechStatusEvent['status']>('stopped')
+  const [speechMessage, setSpeechMessage] = useState('')
+  const [speechInterim, setSpeechInterim] = useState('')
+  const [detectionSettings, setDetectionSettings] = useState(loadBibleDetectionSettings)
+  const detectionSettingsRef = useRef(detectionSettings)
+  const detectionTranscriptRef = useRef('')
+  const completedSpeechTranscriptRef = useRef('')
+  const pendingDetectionTranscriptRef = useRef<DetectionRequest | null>(null)
+  const detectionAnalysisRunningRef = useRef(false)
+  const analyzeBibleTranscriptRef = useRef<(request: DetectionRequest) => void>(() => {})
+  const speechAnalysisTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const previewedDetectionIdsRef = useRef(new Set<string>())
+  const liveDetectionIdsRef = useRef(new Set<string>())
   const [alertTitleDraft, setAlertTitleDraft] = useState('')
   const [alertDraft, setAlertDraft] = useState('')
   const [alertMode, setAlertMode] = useState<'static' | 'scrolling'>('static')
@@ -512,6 +553,41 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
   const [alertRepeatCount, setAlertRepeatCount] = useState(3)
   const [alertRepeatForever, setAlertRepeatForever] = useState(false)
   const [savedAlerts, setSavedAlerts] = useState<SavedMessageAlert[]>(loadSavedMessageAlerts)
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let active = true
+    const cleanup: (() => void)[] = []
+    void listen<SpeechTranscriptEvent>('bible-speech-transcript', (event) => {
+      if (!event.payload.authoritative) {
+        setSpeechInterim(event.payload.text)
+        if (detectionSettingsRef.current.detectWhileListening) {
+          if (speechAnalysisTimerRef.current) clearTimeout(speechAnalysisTimerRef.current)
+          const transcript = `${completedSpeechTranscriptRef.current} ${event.payload.text}`.trim().slice(-700)
+          speechAnalysisTimerRef.current = setTimeout(() => {
+            analyzeBibleTranscriptRef.current({ transcript, origin: 'microphone', finalSegment: false })
+          }, 400)
+        }
+        return
+      }
+      if (speechAnalysisTimerRef.current) clearTimeout(speechAnalysisTimerRef.current)
+      setSpeechInterim('')
+      const next = `${completedSpeechTranscriptRef.current.trim()} ${event.payload.text}`.trim().slice(-700)
+      const alternatives = event.payload.alternatives
+        .map((text) => `${completedSpeechTranscriptRef.current.trim()} ${text}`.trim().slice(-700))
+        .filter((text) => text && text !== next)
+      completedSpeechTranscriptRef.current = next
+      detectionTranscriptRef.current = event.payload.text
+      setDetectionTranscript(event.payload.text)
+      if (detectionSettingsRef.current.detectWhileListening) analyzeBibleTranscriptRef.current({ transcript: next, alternatives, origin: 'microphone', finalSegment: true })
+    }).then((unlisten) => { if (active) cleanup.push(unlisten); else unlisten() })
+    void listen<SpeechStatusEvent>('bible-speech-status', (event) => {
+      setSpeechStatus(event.payload.status)
+      setSpeechMessage(event.payload.message ?? '')
+      if (event.payload.status !== 'listening') setSpeechInterim('')
+    }).then((unlisten) => { if (active) cleanup.push(unlisten); else unlisten() })
+    return () => { active = false; cleanup.forEach((unlisten) => unlisten()) }
+  }, [])
   const [alertLibrarySearch, setAlertLibrarySearch] = useState('')
   const [activeAlert, setActiveAlert] = useState<MessageAlert | null>(null)
   const [presentationTheme, setPresentationTheme] = useState<PresentationTheme>(loadPresentationTheme)
@@ -1107,6 +1183,171 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
     setPersistenceMessage(`${items.length} slides sent to Preview and Live.`)
   }
 
+  function slidesForDetectedReference(candidate: DetectedBibleReference): PresentationSlide[] {
+    return candidate.verses.map((verse) => ({
+      sourceId: `${candidate.translationId}:${candidate.bookNumber}:${candidate.chapterNumber}:${verse.verse_number}`,
+      title: `${candidate.bookName} ${candidate.chapterNumber}:${verse.verse_number}`,
+      subtitle: candidate.translationId,
+      body: verse.text,
+      reference: `${candidate.bookName} ${candidate.chapterNumber}:${verse.verse_number}`,
+      kind: 'scripture',
+      translationId: candidate.translationId,
+      bookNumber: candidate.bookNumber,
+      chapterNumber: candidate.chapterNumber,
+      verseNumber: verse.verse_number,
+    }))
+  }
+
+  async function refreshAudioInputs() {
+    try {
+      const inputs = await invoke<AudioInput[]>('list_audio_inputs')
+      setAudioInputs(inputs)
+      if (!selectedAudioInput) {
+        const defaultInput = inputs.find((input) => input.is_default)
+        if (defaultInput) setSelectedAudioInput(String(defaultInput.index))
+      }
+      setSpeechMessage(inputs.length ? `${inputs.length} microphone input${inputs.length === 1 ? '' : 's'} available.` : 'No microphone inputs found.')
+    } catch (error) { setSpeechMessage(String(error)) }
+  }
+
+  async function startBibleMicrophone() {
+    try {
+      const inputs = audioInputs.length ? audioInputs : await invoke<AudioInput[]>('list_audio_inputs')
+      setAudioInputs(inputs)
+      if (!inputs.length) throw new Error('No microphone inputs found.')
+      const deviceIndex = selectedAudioInput ? Number(selectedAudioInput) : null
+      if (speechAnalysisTimerRef.current) clearTimeout(speechAnalysisTimerRef.current)
+      completedSpeechTranscriptRef.current = ''
+      detectionTranscriptRef.current = ''
+      previewedDetectionIdsRef.current.clear()
+      liveDetectionIdsRef.current.clear()
+      setDetectionTranscript('')
+      setDetectedReferences([])
+      await invoke('start_bible_microphone', { deviceIndex, engine: detectionSettingsRef.current.speechEngine, language: detectionSettingsRef.current.whisperLanguage })
+      setSpeechMessage('Starting offline speech recognition…')
+    } catch (error) { setSpeechStatus('error'); setSpeechMessage(String(error)) }
+  }
+
+  async function stopBibleMicrophone() {
+    try { await invoke('stop_bible_microphone') }
+    catch (error) { setSpeechMessage(String(error)) }
+  }
+
+  async function matchBibleTranscript(request: DetectionRequest) {
+    const transcript = request.transcript.trim()
+    if (request.origin === 'manual') setDetectionMessage('Matching the transcript against the installed Bible…')
+    try {
+      const transcripts = [...new Set([transcript, ...(request.alternatives ?? [])].map((item) => item.trim()).filter(Boolean))]
+      const variants = await Promise.all(transcripts.map(async (text) => {
+        const [referenceResult, quoteResult] = await Promise.allSettled([
+          invoke<DetectedBibleReference[]>('detect_bible_references', { transcript: text, translationId: 'KJV' }),
+          invoke<DetectedBibleReference[]>('detect_bible_quotes', { transcript: text, translationId: 'KJV' }),
+        ])
+        return { referenceResult, quoteResult }
+      }))
+      const referencesByTranscript = variants.map(({ referenceResult }) => referenceResult.status === 'fulfilled' ? referenceResult.value : [])
+      const quotationsByTranscript = variants.map(({ quoteResult }) => quoteResult.status === 'fulfilled' ? quoteResult.value : [])
+      const references = [...new Map(referencesByTranscript.flat().map((candidate) => [candidate.reference, candidate])).values()]
+      const quotations = [...new Map(quotationsByTranscript.flat().map((candidate) => [candidate.reference, candidate])).values()]
+      const agreedReferences = new Set(referencesByTranscript[0]?.map((candidate) => candidate.reference) ?? [])
+      for (const variantReferences of referencesByTranscript.slice(1)) {
+        const variantSet = new Set(variantReferences.map((candidate) => candidate.reference))
+        for (const reference of agreedReferences) if (!variantSet.has(reference)) agreedReferences.delete(reference)
+      }
+      const results = [...new Map([...quotations, ...references].map((candidate) => [candidate.reference, candidate])).values()]
+      if (request.origin === 'manual' || results.length) setDetectedReferences(results)
+      const failedVariants = variants.filter(({ referenceResult, quoteResult }) => referenceResult.status === 'rejected' && quoteResult.status === 'rejected')
+      if (failedVariants.length === variants.length) {
+        const firstFailure = failedVariants[0].referenceResult
+        throw firstFailure.status === 'rejected' ? firstFailure.reason : new Error('Bible matching is unavailable.')
+      }
+      const searchWarning = variants.some(({ quoteResult }) => quoteResult.status === 'rejected') ? ' Some wording searches were unavailable.' : ''
+      if (request.origin === 'microphone' && detectionSettingsRef.current.detectWhileListening && results.length) {
+        const settings = detectionSettingsRef.current
+        const routeId = (candidate: DetectedBibleReference) => `${candidate.detectionMethod ?? 'reference'}:${candidate.reference}`
+        const liveSlides: PresentationSlide[] = []
+        const previewSlides: PresentationSlide[] = []
+        for (const candidate of references) {
+          const id = routeId(candidate)
+          if (liveDetectionIdsRef.current.has(id)) continue
+          const isBoundedPassage = candidate.reference.includes(':')
+          if (request.finalSegment && settings.directReferencesToLive && isBoundedPassage && agreedReferences.has(candidate.reference)) {
+            liveDetectionIdsRef.current.add(id)
+            liveSlides.push(...slidesForDetectedReference(candidate))
+          } else if (request.finalSegment && !previewedDetectionIdsRef.current.has(id)) {
+            previewedDetectionIdsRef.current.add(id)
+            previewSlides.push(...slidesForDetectedReference(candidate))
+          }
+        }
+        for (const candidate of quotations) {
+          const id = routeId(candidate)
+          const score = Math.round((candidate.matchScore ?? 0) * 100)
+          if (request.finalSegment && score >= settings.reviewThreshold && !previewedDetectionIdsRef.current.has(id)) {
+            previewedDetectionIdsRef.current.add(id)
+            previewSlides.push(...slidesForDetectedReference(candidate))
+          }
+        }
+        if (liveSlides.length || previewSlides.length) {
+          const slides = [...liveSlides, ...previewSlides]
+          if (sequence.length + slides.length > 500) {
+            setPersistenceMessage(`A saved show can contain up to 500 slides. There is room for ${Math.max(0, 500 - sequence.length)} more.`)
+          } else {
+            const items = slides.map((slide) => ({ ...slide, queueId: crypto.randomUUID() }))
+            const position = sequence.length
+            setSequence((current) => [...current, ...items])
+            if (liveSlides.length) sendLive(items[0], position)
+            const previewIndex = previewSlides.length ? liveSlides.length : 0
+            stagePreview(items[previewIndex], position + previewIndex)
+            setDetectionMessage(liveSlides.length
+              ? `Validated passage sent to Live${previewSlides.length ? ' and another match staged in Preview' : ''}.`
+              : `Bible passage staged in Preview: ${references.map((candidate) => candidate.reference).join(', ') || quotations.map((candidate) => candidate.reference).join(', ')}.`)
+          }
+        } else if (request.finalSegment) {
+          setDetectionMessage(results.length
+            ? 'A wording match was found, but it did not reach the Preview review threshold.'
+            : 'No Bible reference or wording match found in the latest speech segment.')
+        }
+      } else if (request.origin === 'manual') {
+        setDetectionMessage((results.length
+          ? `Found ${references.length} direct reference${references.length === 1 ? '' : 's'} and ${quotations.length} wording match${quotations.length === 1 ? '' : 'es'}. Wording similarity is not calibrated confidence.`
+          : 'No reference or strong wording match found in the installed KJV.') + searchWarning)
+      }
+    } catch (error) {
+      setDetectedReferences([])
+      setDetectionMessage(String(error))
+    }
+  }
+
+  function enqueueBibleTranscript(request?: DetectionRequest) {
+    const nextRequest = request ?? { transcript: detectionTranscript, origin: 'manual' as const, finalSegment: true }
+    const transcript = nextRequest.transcript.trim()
+    if (!transcript) return
+    pendingDetectionTranscriptRef.current = { ...nextRequest, transcript }
+    if (detectionAnalysisRunningRef.current) return
+    detectionAnalysisRunningRef.current = true
+    setDetectionBusy(true)
+    void (async () => {
+      try {
+        while (pendingDetectionTranscriptRef.current !== null) {
+          const next = pendingDetectionTranscriptRef.current
+          pendingDetectionTranscriptRef.current = null
+          await matchBibleTranscript(next)
+        }
+      } finally {
+        detectionAnalysisRunningRef.current = false
+        setDetectionBusy(false)
+        if (pendingDetectionTranscriptRef.current !== null) enqueueBibleTranscript(pendingDetectionTranscriptRef.current)
+      }
+    })()
+  }
+
+  useEffect(() => { analyzeBibleTranscriptRef.current = enqueueBibleTranscript }, [detectionTranscript, detectionSettings])
+  useEffect(() => {
+    detectionSettingsRef.current = detectionSettings
+    try { localStorage.setItem('bibleshow-bible-detection-settings', JSON.stringify(detectionSettings)) } catch { /* Settings remain available for this session. */ }
+  }, [detectionSettings])
+  useEffect(() => { detectionTranscriptRef.current = detectionTranscript }, [detectionTranscript])
+
   function selectPreviewPosition(position: number) {
     const item = sequence[position]
     if (!item) return
@@ -1377,6 +1618,34 @@ function PresentationWorkspace({ onBack, onRefreshLibrary }: { onBack: () => voi
         <aside className="operator-display-controls operator-pane">
           <header className="pane-heading"><div><strong>Display controls</strong><small>{liveDisplayOpen ? 'Local Live monitor ready' : 'Local Live monitor closed'}</small></div><span className={liveDisplayOpen ? 'display-ready-dot' : 'display-closed-dot'} /></header>
           <section className="display-control-group"><h3>Clear items</h3><button onClick={() => stagePreview(null, null)} disabled={!previewSlide}>Clear Preview</button><button onClick={() => { setLiveSlide(null); setLivePosition(null); setLivePlayback(null) }} disabled={!liveSlide}>Clear Live content</button><button onClick={clearMediaFromSequence} disabled={!sequence.some((item) => item.kind === 'image' || item.kind === 'video')}>Clear media from show</button><button onClick={() => setOverlays((items) => items.map((item) => item.locked ? item : { ...item, visible: false }))} disabled={!overlays.some((item) => item.visible && !item.locked)}>Clear unlocked overlays</button><button onClick={() => setActiveAlert(null)} disabled={!activeAlert}>Clear message alert</button><button onClick={() => setLiveDisplayOpen(false)} disabled={!liveDisplayOpen}>Hide operator Live monitor</button><button onClick={() => setLiveDisplayOpen(true)} disabled={liveDisplayOpen}>Show operator Live monitor</button></section>
+          <details className="display-control-group bible-detection-panel" open={speechStatus === 'listening'}>
+            <summary>Offline Bible detection</summary>
+            <small>Microphone speech is checked against the KJV as it arrives. Combined mode compares both final transcripts; a reference found in only one transcript stays in Preview for review.</small>
+            <textarea aria-label="Latest speech phrase or transcript to search" rows={3} maxLength={2000} value={detectionTranscript} onChange={(event) => setDetectionTranscript(event.target.value)} placeholder="Latest speech phrase appears here; paste text to search manually" />
+            <button className="save-presentation-button" onClick={() => enqueueBibleTranscript()} disabled={!detectionTranscript.trim() || detectionBusy}>{detectionBusy ? 'Matching…' : 'Find Bible passages'}</button>
+            {detectionMessage && <small role="status">{detectionMessage}</small>}
+            {detectedReferences.map((candidate) => <article className="bible-detection-result" key={`${candidate.reference}-${candidate.detectionMethod}`}>
+              <strong>{candidate.reference}{candidate.detectionMethod === 'quotation' ? ` · wording match ${Math.round((candidate.matchScore ?? 0) * 100)}%` : ''}</strong>
+              <small>{candidate.detectionMethod === 'quotation' ? 'Wording similarity, not calibrated confidence' : 'Validated direct reference'} · {candidate.verses[0]?.text}</small>
+              <div className="display-actions"><button type="button" onClick={() => addManyToSequence(slidesForDetectedReference(candidate))}>Review {candidate.verses.length === 1 ? 'verse' : 'verses'}</button><button type="button" className="save-presentation-button" onClick={() => presentSlides(slidesForDetectedReference(candidate))}>Send Live</button></div>
+            </article>)}
+          </details>
+          <details className="display-control-group speech-detection-panel" open={speechStatus === 'listening'}>
+            <summary>Microphone detection</summary>
+            <small>Combined mode checks streaming and Whisper transcripts against the local Bible. Audio stays in memory and is discarded; it is never saved.</small>
+            <label>Input microphone<select value={selectedAudioInput} onChange={(event) => setSelectedAudioInput(event.target.value)}><option value="">Default microphone</option>{audioInputs.map((input) => <option key={input.index} value={input.index}>{input.name}{input.is_default ? ' · default' : ''}</option>)}</select></label>
+            <label>Recognition mode<select value={detectionSettings.speechEngine} disabled={speechStatus === 'listening'} onChange={(event) => setDetectionSettings((settings) => ({ ...settings, speechEngine: event.target.value as BibleDetectionSettings['speechEngine'] }))}><option value="combined">Streaming + Whisper comparison</option><option value="streaming">Fast streaming only · English model</option></select></label>
+            {detectionSettings.speechEngine === 'combined' && <label>Whisper language<select value={detectionSettings.whisperLanguage} disabled={speechStatus === 'listening'} onChange={(event) => setDetectionSettings((settings) => ({ ...settings, whisperLanguage: event.target.value as BibleDetectionSettings['whisperLanguage'] }))}><option value="en">English</option><option value="auto">Detect automatically</option></select></label>}
+            <label className="speech-detection-toggle"><input type="checkbox" checked={detectionSettings.detectWhileListening} onChange={(event) => setDetectionSettings((settings) => ({ ...settings, detectWhileListening: event.target.checked }))} />Detect Bible matches while listening</label>
+            <label className="speech-detection-toggle"><input type="checkbox" checked={detectionSettings.directReferencesToLive} onChange={(event) => setDetectionSettings((settings) => ({ ...settings, directReferencesToLive: event.target.checked }))} />Send validated verse references to Live after recognition finalizes</label>
+            <label className="speech-detection-toggle"><input type="checkbox" checked={false} disabled title="Available after semantic matching is calibrated" />Send paraphrases to Live automatically</label>
+            <label>Review wording matches from {detectionSettings.reviewThreshold}%<input type="range" min="50" max="95" step="1" value={detectionSettings.reviewThreshold} onChange={(event) => setDetectionSettings((settings) => ({ ...settings, reviewThreshold: Math.min(Number(event.target.value), settings.liveThreshold) }))} /></label>
+            <label>Paraphrase Auto-Live threshold {detectionSettings.liveThreshold}%<input type="range" min="70" max="100" step="1" value={detectionSettings.liveThreshold} disabled /></label>
+            <small>Direct references are checked against installed Bible verses. Wording scores are similarity, not accuracy. Semantic paraphrase matching and calibrated Auto-Live still need to be completed.</small>
+            <div className="display-actions"><button type="button" onClick={() => void refreshAudioInputs()}>Refresh microphones</button>{speechStatus === 'listening' ? <button type="button" onClick={() => void stopBibleMicrophone()}>Stop listening</button> : <button className="save-presentation-button" type="button" onClick={() => { setSpeechStatus('listening'); void startBibleMicrophone() }} disabled={!isTauri()}>Start listening</button>}</div>
+            <small role="status">{speechMessage || (speechStatus === 'listening' ? 'Listening for speech…' : 'Microphone is stopped.')}</small>
+            {speechInterim && <p className="speech-interim" aria-live="polite">Heard: {speechInterim}</p>}
+          </details>
           <section className="display-control-group"><h3>Audience output</h3><label>Display<select value={selectedDisplay} onChange={(event) => { userSelectedDisplay.current = true; setSelectedDisplay(event.target.value) }} disabled={!displays.length}><option value="">Select a display</option>{displays.map((display) => <option key={display.id} value={display.id}>{display.name} · {display.isPrimary ? 'Primary' : 'Secondary'} · {display.width} × {display.height}</option>)}</select></label><div className="display-actions"><button className="save-presentation-button" onClick={() => void toggleAudienceWindow(true)} disabled={audienceWindowOpen || selectedDisplay === ''}>Open fullscreen output</button><button type="button" onClick={() => void refreshDisplays()}>Refresh displays</button></div><button className="display-close-button" onClick={() => void toggleAudienceWindow(false)} disabled={!audienceWindowOpen}>Close audience output</button><small role="status">{audienceWindowOpen ? `Live is projecting to ${selectedDisplayInfo?.name ?? 'the selected screen'}. ${displayStatus}` : displayStatus}</small></section>
           <section className="display-control-group message-alert-controls"><h3>Message alert</h3><label>Title<input value={alertTitleDraft} maxLength={80} onChange={(event) => setAlertTitleDraft(event.target.value)} placeholder="Name this message" /></label><label>Message<textarea value={alertDraft} onChange={(event) => setAlertDraft(event.target.value)} placeholder="Type a message for the audience" rows={3} /></label><div className="alert-setting-row"><label>Display style<select value={alertMode} onChange={(event) => setAlertMode(event.target.value as 'static' | 'scrolling')}><option value="static">Static</option><option value="scrolling">Scrolling</option></select></label><label>Position<select value={alertPosition} onChange={(event) => setAlertPosition(event.target.value as MessageAlert['position'])}><option value="bottom">Bottom</option><option value="middle">Middle</option><option value="top">Top</option></select></label></div><label>Text size <output>{alertFontSize.toFixed(1)}vw</output><input type="range" min="1.8" max="6" step="0.1" value={alertFontSize} onChange={(event) => setAlertFontSize(Number(event.target.value))} /></label><div className="alert-color-row"><label>Text color<input type="color" value={alertTextColor} onChange={(event) => setAlertTextColor(event.target.value)} /></label><label>Background<input type="color" value={alertBackgroundColor} onChange={(event) => setAlertBackgroundColor(event.target.value)} /></label></div>{alertMode === 'static' ? <label>Show for (seconds)<input type="number" min="1" max="600" value={alertStaticDuration} onChange={(event) => setAlertStaticDuration(Math.max(1, Math.min(600, Number(event.target.value) || 1)))} /></label> : <><label>Repeat count<input type="number" min="1" max="100" value={alertRepeatCount} disabled={alertRepeatForever} onChange={(event) => setAlertRepeatCount(Math.max(1, Math.min(100, Number(event.target.value) || 1)))} /></label><label className="alert-repeat-toggle"><input type="checkbox" checked={alertRepeatForever} onChange={(event) => setAlertRepeatForever(event.target.checked)} />Continue until removed</label></>}<div className="alert-actions"><button className="save-presentation-button" onClick={showAlert} disabled={!alertDraft.trim() || !liveDisplayOpen}>Show alert</button><button onClick={saveAlertToLibrary} disabled={!alertTitleDraft.trim() || !alertDraft.trim()}>Save message</button><button onClick={() => setActiveAlert(null)} disabled={!activeAlert}>Clear</button></div><label>Search saved messages<input type="search" value={alertLibrarySearch} onChange={(event) => setAlertLibrarySearch(event.target.value)} placeholder="Search titles and messages" /></label><div className="saved-alert-list">{savedAlerts.filter((item) => `${item.title} ${item.content}`.toLowerCase().includes(alertLibrarySearch.trim().toLowerCase())).map((item) => <div key={item.id}><button className="saved-alert-load" onClick={() => loadAlertFromLibrary(item)}><strong>{item.title}</strong><small>{item.content}</small></button><button className="saved-alert-delete" onClick={() => setSavedAlerts((items) => items.filter((saved) => saved.id !== item.id))} aria-label={`Delete saved alert ${item.title}`}>×</button></div>)}{savedAlerts.length === 0 && <small className="saved-alert-empty">Save a titled message to reuse it here.</small>}{savedAlerts.length > 0 && !savedAlerts.some((item) => `${item.title} ${item.content}`.toLowerCase().includes(alertLibrarySearch.trim().toLowerCase())) && <small className="saved-alert-empty">No saved messages match.</small>}</div></section>
           {activeAlert && <p className="alert-live-status" role="status">{activeAlert.mode === 'scrolling' ? activeAlert.repeatCount === null ? 'Scrolling until removed' : `Scrolling ${activeAlert.repeatCount} time${activeAlert.repeatCount === 1 ? '' : 's'}` : `Static for ${activeAlert.staticDurationSeconds}s`} · {activeAlert.position}</p>}

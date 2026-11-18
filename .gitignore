@@ -11,6 +11,11 @@ node_modules
 dist
 dist-ssr
 *.local
+src-tauri/resources/speech-models/*.onnx
+src-tauri/resources/speech-models/*.download
+src-tauri/resources/speech-models/tokens.txt
+src-tauri/resources/speech-models/tiny-tokens.txt
+src-tauri/resources/speech-models/tiny.en-tokens.txt
 
 # Editor directories and files
 .vscode/*

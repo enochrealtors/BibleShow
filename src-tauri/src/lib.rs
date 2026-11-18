@@ -1,7 +1,9 @@
+mod bible_detection;
 mod live_feed;
 mod media_stream;
 mod powerpoint;
 mod resource_import;
+mod speech_recognition;
 
 use roxmltree::{Document, Node};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -150,6 +152,19 @@ struct BibleSearchResult {
     chapter_number: i64,
     verse_number: i64,
     text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DetectedBibleReference {
+    reference: String,
+    translation_id: String,
+    book_number: i64,
+    book_name: String,
+    chapter_number: i64,
+    detection_method: String,
+    match_score: Option<f64>,
+    verses: Vec<VerseItem>,
 }
 
 #[derive(Serialize)]
@@ -605,6 +620,96 @@ fn search_bible_keyword(app: tauri::AppHandle, translation_id: Option<String>, q
     statement.query_map(params![translation_id, pattern, limit], |row| Ok(BibleSearchResult {
         book_number: row.get(0)?, book_name: row.get(1)?, chapter_number: row.get(2)?, verse_number: row.get(3)?, text: row.get(4)?,
     })).map_err(db_error)?.collect::<Result<Vec<_>, _>>().map_err(db_error)
+}
+
+#[tauri::command]
+fn detect_bible_references(
+    app: tauri::AppHandle,
+    transcript: String,
+    translation_id: Option<String>,
+) -> Result<Vec<DetectedBibleReference>, String> {
+    if transcript.trim().is_empty() || transcript.chars().count() > 2_000 {
+        return Err("Enter transcript text of 1 to 2,000 characters.".into());
+    }
+    let translation_id = translation_id.unwrap_or_else(|| "KJV".into());
+    let path = database_path(&app)?;
+    if !path.exists() {
+        return Err("Import a Bible version from Home before detecting passages.".into());
+    }
+    let db = open_library(&app)?;
+    let books = db.prepare("SELECT book_number,name FROM bible_books WHERE translation_id=?1 ORDER BY book_number")
+        .map_err(db_error)?
+        .query_map([&translation_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))
+        .map_err(db_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(db_error)?;
+    let references = bible_detection::parse_references(&transcript, &books);
+    let mut candidates = Vec::with_capacity(references.len());
+    let mut total_verses = 0;
+    for reference in references.into_iter().take(50) {
+        let start = reference.verse_start.unwrap_or(1);
+        let end = reference.verse_end.unwrap_or(i64::MAX);
+        let mut statement = db.prepare("SELECT verse_number,text FROM bible_verses WHERE translation_id=?1 AND book_number=?2 AND chapter_number=?3 AND verse_number BETWEEN ?4 AND ?5 ORDER BY verse_number LIMIT 251")
+            .map_err(db_error)?;
+        let verses = statement.query_map(params![translation_id,reference.book_number,reference.chapter_number,start,end], |row| Ok(VerseItem {
+            verse_number: row.get(0)?, text: row.get(1)?,
+        })).map_err(db_error)?.collect::<Result<Vec<_>, _>>().map_err(db_error)?;
+        if verses.is_empty() || verses.len() > 250 {
+            continue;
+        }
+        if reference.verse_start.is_some_and(|verse| verses.first().is_none_or(|item| item.verse_number != verse)) {
+            continue;
+        }
+        if reference.verse_end.is_some_and(|last| verses.last().is_none_or(|item| item.verse_number < last)) {
+            continue;
+        }
+        if total_verses + verses.len() > 500 { break; }
+        total_verses += verses.len();
+        let label = match (reference.verse_start, reference.verse_end) {
+            (Some(first), Some(last)) if first == last => format!("{} {}:{}", reference.book_name, reference.chapter_number, first),
+            (Some(first), Some(last)) => format!("{} {}:{}-{}", reference.book_name, reference.chapter_number, first, last),
+            _ => format!("{} {}", reference.book_name, reference.chapter_number),
+        };
+        candidates.push(DetectedBibleReference {
+            reference: label,
+            translation_id: translation_id.clone(),
+            book_number: reference.book_number,
+            book_name: reference.book_name,
+            chapter_number: reference.chapter_number,
+            detection_method: "reference".into(),
+            match_score: None,
+            verses,
+        });
+    }
+    Ok(candidates)
+}
+
+#[tauri::command]
+fn detect_bible_quotes(
+    app: tauri::AppHandle,
+    transcript: String,
+    translation_id: Option<String>,
+) -> Result<Vec<DetectedBibleReference>, String> {
+    if transcript.trim().is_empty() || transcript.chars().count() > 2_000 {
+        return Err("Enter transcript text of 1 to 2,000 characters.".into());
+    }
+    let translation_id = translation_id.unwrap_or_else(|| "KJV".into());
+    if !database_path(&app)?.exists() {
+        return Err("Import a Bible version from Home before matching quotations.".into());
+    }
+    let db = open_library(&app)?;
+    bible_detection::find_quote_matches(&db, &translation_id, &transcript)
+        .map_err(|error| format!("Local quotation search error: {error}"))
+        .map(|matches| matches.into_iter().map(|candidate| DetectedBibleReference {
+            reference: format!("{} {}:{}", candidate.book_name, candidate.chapter_number, candidate.verse_number),
+            translation_id: translation_id.clone(),
+            book_number: candidate.book_number,
+            book_name: candidate.book_name,
+            chapter_number: candidate.chapter_number,
+            detection_method: "quotation".into(),
+            match_score: Some(candidate.score),
+            verses: vec![VerseItem { verse_number: candidate.verse_number, text: candidate.text }],
+        }).collect())
 }
 
 fn read_resource_request<T: for<'de> Deserialize<'de>>(request: &Request<'_>, label: &str, max_bytes: Option<usize>) -> Result<T, String> {
@@ -2079,6 +2184,7 @@ pub fn run() {
             app.manage(live_feed::LiveFeedState::default());
             app.manage(powerpoint::PowerPointState::default());
             app.manage(media_stream::MediaStreamState::start().map_err(std::io::Error::other)?);
+            app.manage(speech_recognition::SpeechRecognitionState::default());
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("BibleShow")
                 .inner_size(800.0, 600.0)
@@ -2114,6 +2220,11 @@ pub fn run() {
             get_bible_books,
             get_bible_chapter,
             search_bible_keyword,
+            detect_bible_references,
+            detect_bible_quotes,
+            speech_recognition::list_audio_inputs,
+            speech_recognition::start_bible_microphone,
+            speech_recognition::stop_bible_microphone,
             import_media_file,
             get_media_files,
             get_available_displays,

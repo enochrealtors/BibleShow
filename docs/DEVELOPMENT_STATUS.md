@@ -1,7 +1,7 @@
 # BIBLESHOW — DEVELOPMENT STATUS
 
 **Document version:** 1.0
-**Last updated:** 10 November 2026
+**Last updated:** 18 November 2026
 **Project status:** GitHub baseline established; initial shell and local KJV/lyrics importer implemented; starter content package prepared.
 
 ## 1. Current Development Environment
@@ -413,3 +413,47 @@ A new development session must read this document and PROJECT_GUIDE.md before mo
 - Enforced the existing 500-slide show limit when adding one or multiple items so a show cannot become unsavable through these actions.
 - Verification: final `npm run build` and `git diff --check` passed. Desktop interaction review remains pending because the Windows UI bridge timed out earlier in this session.
 - All six requested batches now have implementation and production-build checks. No commit or push.
+
+### 31. Current session — Offline Bible reference detection foundation
+
+- The user confirmed that secondary-screen Live output works after connecting the TV and authorized the Bible detector as the next stage. The pushed baseline is `main` at `03eedec`; the working tree was clean before this session.
+- Added a modular Rust parser for explicit Bible references in transcript text, including multiple references, ranges, chapter-only references, canonical book names, common numbered-book forms, and abbreviations. The Tauri command validates candidates against the selected installed translation (KJV by default), suppresses duplicates, and returns verse text.
+- Added a compact operator panel: paste transcript text, inspect validated KJV candidates, queue all verses for review, or explicitly send the selected passage through the existing Preview/Live flow. It does not request microphone access or automatically send anything Live.
+- Verification: `npx tsc --noEmit -p tsconfig.app.json`, temporary-output Vite production build, Rust `cargo check --lib --offline`, and `git diff --check` passed. No tests were added or run.
+- This is only the transcript-to-reference slice. Microphone capture and offline ASR, quotation/fuzzy matching, MiniLM/ONNX paraphrase matching, calibrated confidence thresholds, selectable/toggleable ASR engines, and self-contained Windows/Ubuntu packaging remain unimplemented. Benchmark Vosk, sherpa-onnx and whisper.cpp on sermon audio before selecting defaults or enabling auto-Live.
+- Preserve the uncommitted changes in `src-tauri/src/bible_detection.rs`, `src-tauri/src/lib.rs`, `src/App.tsx`, `src/App.css`, and the updated feature/handoff notes. Do not commit or push unless requested. Do not change the verified audience-display code.
+
+### 32. Current session — Spoken references and local quotation matching
+
+- Extended explicit-reference parsing to common spoken number forms and ranges, including “John three sixteen,” “Romans eight twenty-eight,” and “First Corinthians thirteen four through seven.”
+- Added a lazily built SQLite FTS5 verse index with insert/update/delete triggers, transcript-word candidate retrieval, and a small-edit tolerant lexical-overlap ranker. Transcript matches appear beside direct references and use the existing review/explicit Live actions. The displayed percentage is lexical similarity, not calibrated confidence, and never triggers automatic Live.
+- The detector still accepts pasted transcript text. Microphone capture/ASR (Vosk, sherpa-onnx, whisper.cpp), semantic MiniLM matching, calibration, automatic routing and bundled models remain unimplemented. Cargo/Powershell network transfers fail during TLS credential setup in this environment, so ASR/model dependencies could not be fetched safely in this slice.
+- Verification passed: `cargo test --lib --offline` in an isolated target (14 passed, 0 failed, 1 existing PowerPoint test ignored), TypeScript check, Vite production build and `git diff --check`. Tests cover spoken numeric forms/ranges, quotation matching with small wording edits, and FTS index insert/update/delete synchronization. An initial test run exposed and fixed a separator bug in “John three sixteen.”
+- Targeted ESLint on `src/App.tsx` reports five existing `react-hooks/set-state-in-effect` findings in unrelated effects; it did not report the new detector code. Do not expand this task to refactor those existing effects.
+- Keep all existing uncommitted work, do not commit or push, and preserve the confirmed audience-display behavior. Microphone capture/transcription and bundled offline engines are still the next implementation step.
+
+### 33. Current session — Microphone capture and first streaming ASR path
+
+- Added native microphone enumeration and selection with CPAL, a bounded in-memory mono audio queue, sherpa-onnx streaming Zipformer decoding, interim/final transcript events, and an operator Stop control. Final transcript segments run through the existing local Bible reference and quote matcher. No microphone audio is saved or sent online; all detected passages remain review-only.
+- Added a pinned Apache-2.0 English 20M Zipformer model source and Tauri resource mapping so packaged installers can include the offline model; `npm run prepare:speech-model` prepares the files before a Tauri bundle build. Model weights are ignored by Git.
+- Verified: `npx tsc --noEmit --pretty false --incremental false -p tsconfig.app.json`, Node script syntax, Tauri/package JSON parsing, `rustfmt`, and `git diff --check` pass. Rust `cargo check --lib --offline` reached `sherpa-onnx-sys` but its build script could not resolve `github.com` in this agent environment. Rust API type-check passed with `DOCS_RS=1`, which intentionally skips native linking; this is not a full Windows build or runtime test.
+- Hardened the live path after the initial check: completed Bible lookups are queued so new speech is not skipped while a lookup is busy, and Stop flushes queued audio and the final partial utterance. Replaced the hand-written spelling-distance helper with the specified RapidFuzz Levenshtein scorer while retaining FTS5 candidate filtering.
+- Verification after these hardening changes: the frontend production build passes; Rust `cargo check --lib --offline` passes with `DOCS_RS=1`, including RapidFuzz and the stop-flush path; `rustfmt`, Node script syntax and `git diff --check` pass. `DOCS_RS=1` skips Sherpa native linking, so this is not a full desktop build.
+- Still pending: fetch the Sherpa native archive and model in a network-enabled build shell; verify native linking and the microphone path on Windows and Ubuntu; add Vosk and Whisper selectable adapters; implement MiniLM semantic matching, calibrated confidence and routing controls; evaluate with sermon audio; produce and verify both offline installers. Auto-Live stays disabled.
+- The user's interactive `cargo search` confirms crates.io search works. The non-interactive build shell cannot download packages through Windows Schannel (`SEC_E_NO_CREDENTIALS`) and cannot validate GitHub's release certificate (`UnknownIssuer`); no TLS verification was bypassed.
+- Keep all existing work, preserve the confirmed audience-display behavior, and do not commit or push.
+
+### 34. Current session — Windows Sherpa build and speech model preparation
+
+- The user supplied the official Windows x64 Sherpa archive in `%TEMP%\bibleshow-sherpa-archives`; the folder was created manually. The model files are now present in `src-tauri/resources/speech-models/` and ignored by Git. The preparation script supports resumable downloads; in PowerShell, use `npm.cmd` and `NODE_OPTIONS=--use-system-ca` rather than changing execution policy or disabling TLS verification.
+- Verified: the user's full native `cargo check --manifest-path src-tauri/Cargo.toml --lib` passed; `npm.cmd run prepare:speech-model`, `npm.cmd run build`, and `cargo tauri build --no-bundle` passed. The release executable is `src-tauri/target/release/app.exe`. Targeted `cargo test --manifest-path src-tauri/Cargo.toml --lib bible_detection::tests --offline` passed (5 passed, 0 failed; 10 filtered out). `cargo tauri build --no-bundle` does not create an installer.
+- UI automation could locate BibleShow windows but timed out retrieving accessibility/screenshot state. Therefore microphone capture, transcript events, Stop/final flush, and live passage routing have not been verified interactively.
+- Remaining: runtime microphone review; optional Vosk/Whisper adapters; MiniLM/ONNX paraphrase matching; calibrated confidence, toggles and thresholds; representative sermon evaluation; and fully offline Windows and Ubuntu installers. Auto-Live remains disabled pending calibration. No commit or push; preserve all current changes and model assets.
+
+### 35. Current session — live reference detection and accent-aware ASR
+
+- Changed the speech flow to retain only a 700-character rolling matching context and show the latest recognized segment instead of accumulating a session-long transcript. Detection controls open while the microphone is active, and candidate cards remain visible between updates.
+- Live candidates from interim speech are provisional. Finalized segments stage validated references and strong lexical quotation matches in Preview; direct-reference Auto-Live remains an explicit opt-in and uses database-validated verses. Spoken book-name transcription errors may be corrected only when a constrained fuzzy match is followed by a parseable chapter and verse.
+- Added a selectable streaming-only mode and a combined mode. Combined mode uses the existing Sherpa model for interim words and bundled multilingual Whisper Tiny for a local final pass. Captured audio stays in memory, is capped at 45 seconds per utterance, and is not written to disk. Whisper model files are pinned by revision and verified using SHA-256 during preparation. The model bundle adds about 103 MB.
+- Verified: `npm.cmd run prepare:speech-model`, `npm.cmd run build`, and full native `cargo check --manifest-path src-tauri/Cargo.toml --lib` pass without warnings. No test suite or interactive microphone session was run. The app's microphone/Preview/Live behavior and real accented sermon accuracy still require user-device review.
+- Still pending: MiniLM/ONNX semantic paraphrase matching, calibrated confidence and threshold-based paraphrase routing, Vosk evaluation, representative sermon accuracy measurements, interactive end-to-end verification, and self-contained Windows/Ubuntu installer verification. Paraphrase Auto-Live remains disabled. No commit or push; preserve existing uncommitted work.

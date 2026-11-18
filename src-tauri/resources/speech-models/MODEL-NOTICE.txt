@@ -1,0 +1,24 @@
+BibleShow speech model notice
+
+Model: sherpa-onnx-streaming-zipformer-en-20M-2023-02-17
+Model author/export: csukuangfj
+License: Apache-2.0
+Pinned source revision: d42f2d9f7ca24806fb667456a18a9f1b60f70d16
+Model card: https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17
+Runtime: sherpa-onnx, Apache-2.0
+
+The model is prepared at packaging time by `npm run prepare:speech-model` and bundled
+inside the installer. BibleShow does not download speech models at runtime.
+
+Whisper second pass:
+Model: OpenAI Whisper Tiny multilingual, exported for sherpa-onnx by csukuangfj
+License: MIT
+Pinned source revision: 65176e2deb88badc814a94058666cadccc29b61c
+Model: https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny
+For English mode, BibleShow uses the English-only Tiny export from:
+https://huggingface.co/csukuangfj/sherpa-onnx-whisper-tiny.en
+Pinned source revision: d026532c022fa99fd789d6b32446a1df7b6bfc43
+
+The selected Whisper model runs locally after each short speech segment ends.
+English mode uses tiny.en; automatic language detection uses multilingual tiny.
+All models are prepared at packaging time and are bundled in the installer.
